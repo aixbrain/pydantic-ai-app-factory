@@ -61,7 +61,9 @@ POST /run             {"prompt": "..." | [...], "conversation_id": "...", "messa
 
 On `/run` only `prompt` is required; a list holds content parts in pydantic-ai's
 `UserContent` wire form, `message_history` prior messages in its `ModelMessage`
-wire form.
+wire form. OpenAPI lists `message_history` and the response's `messages` as
+arrays of plain objects, because pydantic-ai's message schema fails OpenAPI
+validation ([pydantic/pydantic-ai#8679](https://github.com/pydantic/pydantic-ai/issues/8679)).
 
 ### Response shapes
 
