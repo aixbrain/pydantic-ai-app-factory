@@ -1100,8 +1100,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "fastapi", extras = ["standard"], marker = "extra == 'examples'", specifier = ">=0.115" },
+    { name = "fastapi", specifier = ">=0.137" },
+    { name = "fastapi", extras = ["standard"], marker = "extra == 'examples'", specifier = ">=0.137" },
     { name = "logfire", extras = ["fastapi"], marker = "extra == 'examples'", specifier = ">=5" },
     { name = "pydantic-ai-slim", specifier = ">=2.16,<3" },
 ]
@@ -1109,7 +1109,7 @@ provides-extras = ["examples"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "fastapi", extras = ["standard"], specifier = ">=0.115" },
+    { name = "fastapi", extras = ["standard"], specifier = ">=0.137" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "logfire", extras = ["fastapi"], specifier = ">=5" },
     { name = "pyright", specifier = ">=1.1.411" },
