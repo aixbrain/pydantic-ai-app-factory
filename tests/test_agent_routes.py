@@ -90,6 +90,16 @@ def test_chat_and_run_report_invalid_extras_in_the_same_422_shape() -> None:
     assert run['detail'][0]['loc'] == ['body', 'extras', 'caseId']
 
 
+def test_openapi_documents_the_run_messages() -> None:
+    openapi = make_client().get('/openapi.json').json()
+    run = openapi['paths']['/run']['post']
+    request_ref = run['requestBody']['content']['application/json']['schema']['$ref']
+    response_ref = run['responses']['200']['content']['application/json']['schema']['$ref']
+    schemas = openapi['components']['schemas']
+    assert 'message_history' in schemas[request_ref.rsplit('/', 1)[1]]['properties']
+    assert 'messages' in schemas[response_ref.rsplit('/', 1)[1]]['properties']
+
+
 # --- /run message history ---
 
 
