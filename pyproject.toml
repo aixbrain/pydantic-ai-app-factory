@@ -19,13 +19,14 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "fastapi>=0.115",
+    # 0.137 is the first release whose `include_router` keeps a feature router's mounts.
+    "fastapi>=0.137",
     "pydantic-ai-slim>=2.16,<3",
 ]
 
 [project.optional-dependencies]
 # What the runnable examples need on top of the package itself.
-examples = ["fastapi[standard]>=0.115", "logfire[fastapi]>=5"]
+examples = ["fastapi[standard]>=0.137", "logfire[fastapi]>=5"]
 
 [project.urls]
 Homepage = "https://github.com/aixbrain/pydantic-ai-app-factory"
@@ -34,7 +35,7 @@ Issues = "https://github.com/aixbrain/pydantic-ai-app-factory/issues"
 
 [dependency-groups]
 dev = [
-    "fastapi[standard]>=0.115",
+    "fastapi[standard]>=0.137",
     "logfire[fastapi]>=5",
     "httpx>=0.27",
     "pytest>=9",
