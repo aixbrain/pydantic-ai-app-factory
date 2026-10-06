@@ -1,0 +1,15 @@
+# Weekly lockfile bumps for the two dependencies the package builds on, so CI tests their newest
+# releases. A new major needs a deliberate change to the bounds in pyproject.toml.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    versioning-strategy: lockfile-only
+    allow:
+      - dependency-name: pydantic-ai-slim
+      - dependency-name: fastapi
+    groups:
+      pydantic-ai-and-fastapi:
+        patterns: ['*']
