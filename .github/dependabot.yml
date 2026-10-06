@@ -13,3 +13,12 @@ updates:
     groups:
       pydantic-ai-and-fastapi:
         patterns: ['*']
+
+  # The workflows pin each action to a commit, so updates only arrive through these PRs.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
