@@ -4,13 +4,13 @@ version = "0.1.0"
 description = "Compose a Pydantic AI agent and its features into a FastAPI application"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { file = "LICENSE" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "aiXbrain GmbH", email = "dev@aixbrain.de" }]
 keywords = ["pydantic-ai", "agent", "fastapi", "composition"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
