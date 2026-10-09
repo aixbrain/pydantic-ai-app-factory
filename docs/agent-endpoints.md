@@ -26,7 +26,7 @@ drive `/chat` when streaming is what it checks, as [Testing](testing.md) does.
 ```
 POST /chat   {"id": "c1", "trigger": "submit-message", "messages": [...], ...extras}
 POST /run    {"prompt": "...", "conversation_id": "...", "message_history": [...], "extras": {...}}
-             -> {"output": "...", "conversation_id": "...", "messages": [...]}
+             -> {"output": "...", "conversation_id": "...", "run_id": "...", "messages": [...]}
 ```
 
 `/chat`'s body is the protocol's; `/run`'s is the factory's own, and only
@@ -70,7 +70,10 @@ Every run carries a `conversation_id`, readable inside the run as
 takes it on `/chat` from the protocol's chat `id`, on `/run` from the body
 field or, when the body has none, from the id the sent history carries;
 Pydantic AI mints one when neither is present. `/run` echoes the id the run
-used, so a JSON client continues by passing it back.
+used, so a JSON client continues by passing it back. Each turn also has a
+`run_id`, unique to that run; `/run` returns it as a field and `/chat` uses it
+as the streamed message's id, so a client can tie feedback or a trace link to
+the answer it rendered.
 
 A client may hold the history and send it in full (`/chat` in `messages`,
 `/run` in `message_history` as pydantic-ai wire-form messages, what
