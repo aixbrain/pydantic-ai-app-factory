@@ -8,7 +8,7 @@ Signatures, defaults, and wire shapes. For what these are *for*, see
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/chat` | POST | Vercel AI chat protocol, streaming |
-| `/run` | POST | Plain JSON `{prompt, conversation_id?, message_history?, extras?}` -> `{output, conversation_id, messages}` |
+| `/run` | POST | Plain JSON `{prompt, conversation_id?, message_history?, extras?}` -> `{output, conversation_id, run_id, messages}` |
 | `/config` | GET | Feature list, composed extras JSON schema and accepted file media types |
 | `/config/features` | GET | How each feature is configured, from `Feature.config()` |
 | `/healthz` | GET | Liveness: the process is up, no external dependency checked |
@@ -44,8 +44,9 @@ capability keys its own storage on.
 prior messages in pydantic-ai's wire form; both are sanitized as the `/chat`
 adapter sanitizes a frontend's messages. The response's `messages` are the
 run's own messages in that same form -- what a client appends to its history
--- with any file the model produced inline. For what a client sends to either
-endpoint and what the app strips from it, see
+-- with any file the model produced inline. `run_id` is that turn's own run
+id, which `/chat` carries as the streamed message's id instead. For what a
+client sends to either endpoint and what the app strips from it, see
 [Agent endpoints](agent-endpoints.md).
 
 Extras fields bind by their snake_case name and by their camelCase alias; the
@@ -68,7 +69,7 @@ validation ([pydantic/pydantic-ai#8679](https://github.com/pydantic/pydantic-ai/
 ### Response shapes
 
 ```
-POST /run             {"output": "...", "conversation_id": "...", "messages": [...]}
+POST /run             {"output": "...", "conversation_id": "...", "run_id": "...", "messages": [...]}
 GET /config           {"features": ["storage"], "extras_schema": {...}, "accepts": ["application/pdf", ...]}
 GET /config/features  {"feature_config": {"storage": {"history_source": "server"}}}
 GET /healthz          {"status": "ok", "features": ["storage"]}
