@@ -6,6 +6,7 @@
 import inspect
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Generic, TypeVar
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.exceptions import RequestValidationError
@@ -138,6 +139,8 @@ class RunResponse(BaseModel):
     output: Any
     conversation_id: str
     """The conversation this run belongs to; pass it back to continue. Minted when the call omitted one."""
+    run_id: str
+    """This run's id. A non-streaming client sends it back as the base a later turn builds on."""
     messages: WireMessages
     """The messages this run produced, in the wire form `message_history` takes.
 
@@ -218,9 +221,16 @@ def agent_router(
     @router.post('/chat')
     async def chat(request: Request, user: Annotated[UserContext, Depends(auth)]) -> Response:
         """Run the agent over the Vercel AI chat protocol and stream the response."""
+        # Minted before the run so the first stream chunk can carry it: the id is unknown once the
+        # run generates its own, but the `start` chunk is already out by then.
+        run_id = uuid4().hex
         try:
             adapter = await VercelAdapter.from_request(
-                request, agent=agent, error_handlers=error_handlers, sdk_version=vercel_sdk_version
+                request,
+                agent=agent,
+                error_handlers=error_handlers,
+                sdk_version=vercel_sdk_version,
+                server_message_id=run_id,
             )
             extras = extras_model.model_validate(adapter.run_input.model_extra or {})
         except ValidationError as exc:
@@ -246,6 +256,7 @@ def agent_router(
             capabilities=capabilities,
             metadata=run_metadata(user),
             usage_limits=resolve_usage_limits(usage_limits, user),
+            run_id=run_id,
         )
         return adapter.streaming_response(stream)
 
@@ -282,6 +293,11 @@ def agent_router(
             agent_error = to_agent_error(exc, error_handlers)
             log_agent_error(agent_error, exc, 'agent run')
             raise agent_error from exc
-        return RunResponse(output=result.output, conversation_id=result.conversation_id, messages=result.new_messages())
+        return RunResponse(
+            output=result.output,
+            conversation_id=result.conversation_id,
+            run_id=result.run_id,
+            messages=result.new_messages(),
+        )
 
     return router

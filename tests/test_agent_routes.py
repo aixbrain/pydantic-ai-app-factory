@@ -1,3 +1,4 @@
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -56,6 +57,24 @@ def test_chat_rejects_a_malformed_body_with_422() -> None:
     assert resp.status_code == 422
 
 
+def test_chat_stamps_the_run_id_as_the_start_message_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The run's own id reaches the client as the assistant message id, so a regenerate can name it.
+    seen: list[str] = []
+    run_stream = VercelAdapter.run_stream
+
+    def spy(self: VercelAdapter, **kwargs: Any) -> Any:
+        seen.append(kwargs['run_id'])
+        return run_stream(self, **kwargs)
+
+    monkeypatch.setattr(VercelAdapter, 'run_stream', spy)
+    resp = make_client().post('/chat', json=submit('hi'))
+
+    first = next(line for line in resp.text.splitlines() if line.startswith('data:'))
+    start = json.loads(first.removeprefix('data:'))
+    assert start['type'] == 'start'
+    assert start['messageId'] == seen[0]
+
+
 # --- /run ---
 
 
@@ -72,6 +91,15 @@ def test_run_echoes_the_conversation_id_so_a_json_client_can_continue() -> None:
 
     again = make_client().post('/run', json={'prompt': 'again', 'conversation_id': minted})
     assert again.json()['conversation_id'] == minted
+
+
+def test_run_returns_the_run_id_the_messages_are_stamped_with() -> None:
+    resp = make_client().post('/run', json={'prompt': 'hi'})
+
+    run_id = resp.json()['run_id']
+    assert run_id
+    messages = ModelMessagesTypeAdapter.validate_python(resp.json()['messages'])
+    assert messages[0].run_id == run_id
 
 
 def test_run_validates_extras_natively() -> None:
