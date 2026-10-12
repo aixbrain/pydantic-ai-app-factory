@@ -2,7 +2,13 @@ import pickle
 
 import httpx
 import pytest
-from pydantic_ai.exceptions import FallbackExceptionGroup, ModelAPIError, ModelHTTPError
+from pydantic_ai.exceptions import (
+    ConcurrencyLimitExceeded,
+    ContentFilterError,
+    FallbackExceptionGroup,
+    ModelAPIError,
+    ModelHTTPError,
+)
 
 from pydantic_ai_app_factory import AgentError
 from pydantic_ai_app_factory.errors import to_agent_error
@@ -199,3 +205,18 @@ def test_a_fixed_handler_is_copied_so_raising_it_cannot_mutate_the_shared_instan
     assert first is not fixed and second is not first
     assert isinstance(first, _NotFound)
     assert (first.code, first.message, first.retryable, first.http_status) == (fixed.code, fixed.message, False, 500)
+
+
+def test_a_full_concurrency_queue_is_a_retryable_outage() -> None:
+    # `max_queued` turning a run away, on the model or on the agent's own run queue, is load shedding.
+    # The caller retries later, as for an outage, and nothing in this service is broken.
+    error = to_agent_error(ConcurrencyLimitExceeded('queue full'))
+    assert (error.code, error.retryable, error.http_status) == ('model-unavailable', True, 503)
+
+
+def test_a_content_filter_refusal_is_model_refused_not_internal() -> None:
+    # A retry of the same request is unlikely to help, so it is not retryable; a 4xx because the remedy
+    # is usually a different request, and because a refusal is no fault worth an ERROR with a traceback.
+    error = to_agent_error(ContentFilterError('filtered'))
+    assert (error.code, error.retryable, error.http_status) == ('model-refused', False, 400)
+    assert 'filtered' not in error.message
