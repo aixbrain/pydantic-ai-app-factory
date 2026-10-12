@@ -37,8 +37,11 @@ async def load_document(ctx: RunContext[AppDeps], document_id: str) -> str:
 
 Four codes are emitted without you raising anything. `model-unavailable`
 (503, retryable) is a transient provider failure: a 429, a 5xx, a connection
-error, or every model of a `FallbackModel` failing -- whatever the individual
-failures were, unless every one of them was a credential rejection.
+error (before pydantic-ai 2.55, a dropped connection on Anthropic, Mistral and
+several other providers is `internal`, because pydantic-ai let the raw
+transport error through), or every model of a `FallbackModel` failing --
+whatever the individual failures were, unless every one of them was a
+credential rejection.
 `model-unauthorized` (502, not retryable) is the provider rejecting the
 deployment's credentials -- a 401 or 403, or every model of a `FallbackModel`
 reporting one -- which is a configuration error, not a bug in your code, and
