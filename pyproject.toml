@@ -21,7 +21,8 @@ classifiers = [
 dependencies = [
     # 0.137 is the first release whose `include_router` keeps a feature router's mounts.
     "fastapi>=0.137",
-    "pydantic-ai-slim>=2.16,<3",
+    # 2.53 fixes GHSA-6fqq-452j-qhrp, where a client disconnecting from `/chat` could leak a `ConcurrencyLimitedModel` slot.
+    "pydantic-ai-slim>=2.53,<3",
 ]
 
 [project.optional-dependencies]
