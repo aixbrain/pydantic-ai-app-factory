@@ -16,8 +16,8 @@ exit. The reserved codes the package emits itself are listed in the
 Raise `AgentError(code, message, retryable=..., http_status=...)` to surface a
 failure with a stable `code` the client can act on, instead of it being masked
 as a generic `internal` error. Namespace codes by feature; the un-namespaced
-codes `internal`, `model-unavailable`, `model-unauthorized` and
-`file-unsupported` are reserved for this package. The `message` must be
+codes `internal`, `model-unavailable`, `model-unauthorized`, `model-refused`
+and `file-unsupported` are reserved for this package. The `message` must be
 user-safe -- it is shown to the caller -- while the runner keeps an
 unrecognized error's detail in the log rather than leaking `str(error)`.
 
@@ -35,20 +35,24 @@ async def load_document(ctx: RunContext[AppDeps], document_id: str) -> str:
 
 ## The package's own codes
 
-Four codes are emitted without you raising anything. `model-unavailable`
+Five codes are emitted without you raising anything. `model-unavailable`
 (503, retryable) is a transient provider failure: a 429, a 5xx, a connection
 error (before pydantic-ai 2.55, a dropped connection on Anthropic, Mistral and
 several other providers is `internal`, because pydantic-ai let the raw
 transport error through), or every model of a `FallbackModel` failing --
 whatever the individual failures were, unless every one of them was a
-credential rejection.
+credential rejection. It also covers a concurrency limit's `max_queued`
+turning the run away, whether the limit sits on the model or on the agent's
+runs; the client answers that the same way, by retrying later.
 `model-unauthorized` (502, not retryable) is the provider rejecting the
 deployment's credentials -- a 401 or 403, or every model of a `FallbackModel`
 reporting one -- which is a configuration error, not a bug in your code, and
-retrying will not help. `file-unsupported` (415, not retryable) is a file
-whose media type is outside what pydantic-ai classifies as an image, audio,
-video or document, refused before the run; `GET /config` lists the accepted
-types as `accepts`. Everything else is `internal` (500), including a model
+retrying will not help. `model-refused` (400, not retryable) is the
+provider's content filter refusing the request or the model's answer; a
+retry of the same request is unlikely to help. `file-unsupported` (415, not
+retryable) is a file whose media type is outside what pydantic-ai classifies
+as an image, audio, video or document, refused before the run; `GET /config`
+lists the accepted types as `accepts`. Everything else is `internal` (500), including a model
 class raising for a class it does not support, see
 [Agent endpoints](agent-endpoints.md#the-new-turn).
 
