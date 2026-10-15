@@ -29,9 +29,8 @@ POST /run    {"prompt": "...", "conversation_id": "...", "message_history": [...
              -> {"output": "...", "conversation_id": "...", "run_id": "...", "messages": [...]}
 ```
 
-`/chat`'s body is the protocol's; `/run`'s is the factory's own, and only
-`prompt` is required. Extras are covered in
-[Request extras](request-extras.md#what-clients-send).
+`/chat`'s body is the protocol's; `/run`'s is the factory's own. Extras are
+covered in [Request extras](request-extras.md#what-clients-send).
 
 ## The new turn
 
@@ -45,6 +44,9 @@ parts when the turn carries more than text, for example a document URL:
 ```
 
 The part kinds, including `binary` for inline base64 data, are pydantic-ai's.
+Without `prompt`, pydantic-ai resumes from the request `message_history` ends
+with, which is how a client retries a failed run.
+
 Two rules on files are the factory's own, and both hold on `/chat` as well. A
 file URL whose media type cannot be inferred from its extension needs an
 explicit `media_type`; without one the request is a 422. And a file, inline
