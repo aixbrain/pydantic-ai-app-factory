@@ -203,6 +203,24 @@ def test_run_strips_a_dangling_client_sent_tool_call() -> None:
     assert not [part for m in seen[0] for part in m.parts if isinstance(part, ToolCallPart)]
 
 
+def test_run_without_a_prompt_resumes_the_trailing_request() -> None:
+    seen: list[list[ModelMessage]] = []
+    history = _wire(
+        ModelRequest(parts=[UserPromptPart(content='hi')]),
+        ModelResponse(parts=[TextPart(content='hello')]),
+        ModelRequest(parts=[UserPromptPart(content='again')]),
+    )
+
+    resp = make_client(agent=_capturing_agent(seen)).post('/run', json={'message_history': history})
+
+    # The model gets the failed turn's request once. The client already holds it, so the returned
+    # messages start after it.
+    assert resp.status_code == 200
+    assert _prompts(seen[0]) == ['hi', 'again']
+    messages = ModelMessagesTypeAdapter.validate_python(resp.json()['messages'])
+    assert [type(m).__name__ for m in messages] == ['ModelResponse']
+
+
 def test_run_inherits_the_conversation_id_carried_by_the_history() -> None:
     history = _wire(
         ModelRequest(parts=[UserPromptPart(content='hi')], conversation_id='c9'),

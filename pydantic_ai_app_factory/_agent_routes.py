@@ -95,8 +95,12 @@ WireMessages = Annotated[list[ModelMessage], _OpaqueMessagesSchema]
 class RunRequest(BaseModel, Generic[ExtrasT]):
     """Body of a `/run` call, parameterized with the composed extras model."""
 
-    prompt: str | list[UserContent] = Field(
-        description='The user message for this run; a list to send files or images alongside the text.'
+    prompt: str | list[UserContent] | None = Field(
+        default=None,
+        description=(
+            'The user message for this run; a list to send files or images alongside the text. Omit it to '
+            'resume a failed run from the request `message_history` ends with.'
+        ),
     )
     conversation_id: str | None = Field(default=None, description='Continues this conversation; omit to run stateless.')
     message_history: WireMessages | None = Field(
@@ -109,8 +113,8 @@ class RunRequest(BaseModel, Generic[ExtrasT]):
 
     @field_validator('prompt')
     @classmethod
-    def _prompt_media_types(cls, prompt: str | list[UserContent]) -> str | list[UserContent]:
-        if not isinstance(prompt, str):
+    def _prompt_media_types(cls, prompt: str | list[UserContent] | None) -> str | list[UserContent] | None:
+        if isinstance(prompt, list):
             require_media_types(prompt)
         return prompt
 
@@ -273,12 +277,13 @@ def agent_router(
         A `message_history` on the body is sanitized as the `/chat` adapter sanitizes the messages
         a frontend sends -- client-sent system prompts, non-http file URLs and dangling tool calls
         are dropped -- so both transports apply the same trust to the caller. The body's
-        `conversation_id` wins over one the history carries.
+        `conversation_id` wins over one the history carries. Without a `prompt`, pydantic-ai sends
+        the request the history ends with again, which is how a client retries a failed run.
         """
-        prompt = sanitize_prompt(body.prompt)
+        prompt = sanitize_prompt(body.prompt) if body.prompt is not None else None
         history = sanitize_messages(body.message_history) if body.message_history else None
         try:
-            require_accepted([*message_media_types(history or ()), *content_media_types(prompt)])
+            require_accepted([*message_media_types(history or ()), *content_media_types(prompt or ())])
             deps = await resolve_deps(deps_builder, request, user, body.extras.model_dump(), expected_deps)
             result = await agent.run(
                 prompt,
