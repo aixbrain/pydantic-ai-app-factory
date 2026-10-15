@@ -8,7 +8,7 @@ Signatures, defaults, and wire shapes. For what these are *for*, see
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/chat` | POST | Vercel AI chat protocol, streaming |
-| `/run` | POST | Plain JSON `{prompt, conversation_id?, message_history?, extras?}` -> `{output, conversation_id, run_id, messages}` |
+| `/run` | POST | Plain JSON `{prompt?, conversation_id?, message_history?, extras?}` -> `{output, conversation_id, run_id, messages}` |
 | `/config` | GET | Feature list, composed extras JSON schema and accepted file media types |
 | `/config/features` | GET | How each feature is configured, from `Feature.config()` |
 | `/healthz` | GET | Liveness: the process is up, no external dependency checked |
@@ -60,10 +60,11 @@ POST /chat            {"id": "c1", "trigger": "submit-message", "messages": [...
 POST /run             {"prompt": "..." | [...], "conversation_id": "...", "message_history": [...], "extras": {...}}
 ```
 
-On `/run` only `prompt` is required; a list holds content parts in pydantic-ai's
-`UserContent` wire form, `message_history` prior messages in its `ModelMessage`
-wire form. OpenAPI lists `message_history` and the response's `messages` as
-arrays of plain objects, because pydantic-ai's message schema fails OpenAPI
+On `/run` `prompt` is optional; without it pydantic-ai resumes from the last
+request in `message_history`. A list `prompt` holds content parts in
+pydantic-ai's `UserContent` wire form, `message_history` prior messages in its
+`ModelMessage` wire form. OpenAPI lists `message_history` and the response's
+`messages` as arrays of plain objects, because pydantic-ai's message schema fails OpenAPI
 validation ([pydantic/pydantic-ai#8679](https://github.com/pydantic/pydantic-ai/issues/8679)).
 
 ### Response shapes
