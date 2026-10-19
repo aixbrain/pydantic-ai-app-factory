@@ -10,28 +10,18 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.exceptions import RequestValidationError
-from pydantic import (
-    BaseModel,
-    Field,
-    GetCoreSchemaHandler,
-    GetJsonSchemaHandler,
-    ValidationError,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import (
     FileUrl,
     ModelMessage,
-    ModelMessagesTypeAdapter,
     ModelRequest,
     UserContent,
     UserPromptPart,
     sanitize_messages,
 )
 from pydantic_ai.usage import UsageLimits
-from pydantic_core import CoreSchema, core_schema
 from starlette.responses import Response
 
 from pydantic_ai_app_factory._envelope import log_agent_error
@@ -63,35 +53,6 @@ def require_media_types(content: Sequence[UserContent]) -> None:
             _ = item.media_type
 
 
-class _OpaqueMessagesSchema:
-    """Validates and serializes `list[ModelMessage]` without exposing its schema to FastAPI.
-
-    Since pydantic-ai 2.42 the validation-mode schema of `ModelMessage` has a discriminator mapping
-    that OpenAPI rejects, and `/openapi.json` fails (pydantic/pydantic-ai#8679). FastAPI emits every
-    definition in a field's core schema, so the message types are kept out of it and the schema is
-    a plain array of objects. Remove once the upstream fix is released.
-    """
-
-    @classmethod
-    def __get_pydantic_core_schema__(cls, source: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
-        return core_schema.no_info_plain_validator_function(
-            ModelMessagesTypeAdapter.validate_python,
-            serialization=core_schema.plain_serializer_function_ser_schema(
-                lambda messages, info: ModelMessagesTypeAdapter.dump_python(
-                    messages, mode='json' if info.mode_is_json() else 'python'
-                ),
-                info_arg=True,
-            ),
-        )
-
-    @classmethod
-    def __get_pydantic_json_schema__(cls, schema: CoreSchema, handler: GetJsonSchemaHandler) -> dict[str, Any]:
-        return {'type': 'array', 'items': {'type': 'object'}}
-
-
-WireMessages = Annotated[list[ModelMessage], _OpaqueMessagesSchema]
-
-
 class RunRequest(BaseModel, Generic[ExtrasT]):
     """Body of a `/run` call, parameterized with the composed extras model."""
 
@@ -103,7 +64,7 @@ class RunRequest(BaseModel, Generic[ExtrasT]):
         ),
     )
     conversation_id: str | None = Field(default=None, description='Continues this conversation; omit to run stateless.')
-    message_history: WireMessages | None = Field(
+    message_history: list[ModelMessage] | None = Field(
         default=None,
         description='Prior messages to run on top of, in pydantic-ai wire form. Sanitized before the run.',
     )
@@ -145,7 +106,7 @@ class RunResponse(BaseModel):
     """The conversation this run belongs to; pass it back to continue. Minted when the call omitted one."""
     run_id: str
     """This run's id. A non-streaming client sends it back as the base a later turn builds on."""
-    messages: WireMessages
+    messages: list[ModelMessage]
     """The messages this run produced, in the wire form `message_history` takes.
 
     The run's own messages only, never the sent history: a client holding the history appends
