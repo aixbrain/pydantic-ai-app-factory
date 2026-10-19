@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -118,14 +119,21 @@ def test_chat_and_run_report_invalid_extras_in_the_same_422_shape() -> None:
     assert run['detail'][0]['loc'] == ['body', 'extras', 'caseId']
 
 
+def _referenced(schema: Any) -> set[str]:
+    """The component names a schema refers to, at any depth."""
+    return set(re.findall(r'#/components/schemas/([A-Za-z]+)', json.dumps(schema)))
+
+
 def test_openapi_documents_the_run_messages() -> None:
     openapi = make_client().get('/openapi.json').json()
     run = openapi['paths']['/run']['post']
     request_ref = run['requestBody']['content']['application/json']['schema']['$ref']
     response_ref = run['responses']['200']['content']['application/json']['schema']['$ref']
     schemas = openapi['components']['schemas']
-    assert 'message_history' in schemas[request_ref.rsplit('/', 1)[1]]['properties']
-    assert 'messages' in schemas[response_ref.rsplit('/', 1)[1]]['properties']
+    history = schemas[request_ref.rsplit('/', 1)[1]]['properties']['message_history']
+    messages = schemas[response_ref.rsplit('/', 1)[1]]['properties']['messages']
+    assert _referenced(history) >= {'ModelRequest', 'ModelResponse'}
+    assert _referenced(messages) >= {'ModelRequest', 'ModelResponse'}
 
 
 # --- /run message history ---
