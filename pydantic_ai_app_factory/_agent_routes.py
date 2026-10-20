@@ -175,6 +175,7 @@ def agent_router(
     capabilities: Sequence[AbstractCapability[AppDeps]],
     error_handlers: ErrorHandlers | None,
     usage_limits: UsageLimitsSource,
+    timeout: float | None,
     deps_builder: DepsBuilder[AppDeps] | None,
     expected_deps: type[AppDeps],
     vercel_sdk_version: VercelSdkVersion,
@@ -221,6 +222,7 @@ def agent_router(
             capabilities=capabilities,
             metadata=run_metadata(user),
             usage_limits=resolve_usage_limits(usage_limits, user),
+            timeout=timeout,
             run_id=run_id,
         )
         return adapter.streaming_response(stream)
@@ -254,6 +256,7 @@ def agent_router(
                 capabilities=capabilities,
                 metadata=run_metadata(user),
                 usage_limits=resolve_usage_limits(usage_limits, user),
+                timeout=timeout,
             )
         except Exception as exc:
             agent_error = to_agent_error(exc, error_handlers)

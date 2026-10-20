@@ -64,6 +64,7 @@ def create_agent_app(
     vercel_sdk_version: VercelSdkVersion = 5,
     error_handlers: ErrorHandlers | None = None,
     usage_limits: UsageLimitsSource = None,
+    timeout: float | None = None,
 ) -> FastAPI: ...
 
 
@@ -79,6 +80,7 @@ def create_agent_app(
     vercel_sdk_version: VercelSdkVersion = 5,
     error_handlers: ErrorHandlers | None = None,
     usage_limits: UsageLimitsSource = None,
+    timeout: float | None = None,
 ) -> FastAPI: ...
 
 
@@ -93,6 +95,7 @@ def create_agent_app(
     vercel_sdk_version: VercelSdkVersion = 5,
     error_handlers: ErrorHandlers | None = None,
     usage_limits: UsageLimitsSource = None,
+    timeout: float | None = None,
 ) -> FastAPI:
     """Compose an agent and its features into a FastAPI app serving the Vercel AI chat protocol.
 
@@ -105,6 +108,9 @@ def create_agent_app(
     feature to claim a `(method, path)` is the one that gets it and any later claim is rejected.
 
     `health_timeout` bounds each feature's `/readyz` check (seconds); a slower one is reported unhealthy.
+
+    `timeout` is Pydantic AI's run `timeout=` in seconds, forwarded to every run. Without one, a hanging
+    provider or tool keeps the request open indefinitely.
 
     `vercel_sdk_version` is the Vercel AI SDK major the `/chat` wire targets. It stays at pydantic-ai's
     own default of 5; raise it to match a frontend on a later SDK, which adds tool-approval streaming
@@ -143,6 +149,7 @@ def create_agent_app(
             capabilities,
             error_handlers,
             usage_limits,
+            timeout,
             deps,
             expected_deps,
             vercel_sdk_version,

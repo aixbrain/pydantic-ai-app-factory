@@ -13,6 +13,7 @@ from pydantic_ai.exceptions import (
     FallbackExceptionGroup,
     ModelAPIError,
     ModelHTTPError,
+    RunTimedOut,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,8 @@ class AgentError(Exception):
     """Stable identifier the caller keys on.
 
     Un-namespaced codes (`internal`, `model-unavailable`, `model-unauthorized`, `model-refused`,
-    `file-unsupported`) are reserved for this package; features and products namespace theirs as `<feature>/<code>`.
+    `run-timeout`, `file-unsupported`) are reserved for this package; features and products namespace
+    theirs as `<feature>/<code>`.
     """
     message: str
     """Human-readable text safe to show the caller."""
@@ -70,9 +72,9 @@ def to_agent_error(exc: Exception, error_handlers: ErrorHandlers | None = None) 
     The first `error_handlers` entry whose type matches translates it, to a fixed `AgentError` or a
     callable that derives one from the exception. An `AgentError` otherwise passes through; a model
     provider rejecting the credentials maps to `model-unauthorized`; its content filter refusing maps to
-    `model-refused`; a transient model-backend failure or a full concurrency queue maps to
-    `model-unavailable`; anything else becomes a generic `internal` error so no unrecognized exception
-    leaks its message to the caller.
+    `model-refused`; a run past its `timeout` maps to `run-timeout`; a transient model-backend
+    failure or a full concurrency queue maps to `model-unavailable`; anything else becomes a generic
+    `internal` error so no unrecognized exception leaks its message to the caller.
 
     This is total: a callable handler that itself raises falls back to `internal` rather than escape as
     an unhandled exception, so a buggy handler cannot break the no-leak contract.
@@ -101,6 +103,10 @@ def to_agent_error(exc: Exception, error_handlers: ErrorHandlers | None = None) 
         # Not retryable, because a retry of the same request is unlikely to help. A 4xx because the remedy is
         # usually a different request, and so the refusal logs at INFO, since nothing in the deployment needs attention.
         return AgentError('model-refused', 'The model provider declined to answer this request.', http_status=400)
+    if isinstance(exc, RunTimedOut):
+        # 504 because the run exceeded the deployment's time limit, retryable because the usual cause, a
+        # hung provider or tool, is transient.
+        return AgentError('run-timeout', 'The agent run timed out.', retryable=True, http_status=504)
     if _model_backend_unavailable(exc):
         return AgentError('model-unavailable', 'The model is temporarily unavailable.', retryable=True)
     return AgentError('internal', 'An internal error occurred.')

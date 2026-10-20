@@ -96,10 +96,10 @@ and this body:
 Mid-stream on `/chat`, the HTTP status is a 200 whatever happens -- the run
 has begun streaming before it can fail. The failure travels in the body: a
 `data-error` chunk carrying the same `{code, message, retryable}` object,
-followed by an `ErrorChunk` with the safe message. A failure before the stream
-starts -- auth, validation, the `deps` builder -- is answered with a status
-like on `/run`. A malformed body or invalid extras is FastAPI's standard 422
-on both endpoints.
+followed by an `ErrorChunk` with the safe message, or by the `abort` chunk a
+timed-out run ends with. A failure before the stream starts -- auth,
+validation, the `deps` builder -- is answered with a status like on `/run`. A
+malformed body or invalid extras is FastAPI's standard 422 on both endpoints.
 
 ## `create_agent`
 
@@ -124,6 +124,7 @@ def create_agent_app(
     health_timeout: float = 5.0,
     error_handlers: ErrorHandlers | None = None,
     usage_limits: UsageLimitsSource = None,
+    timeout: float | None = None,
     vercel_sdk_version: Literal[5, 6, 7] = 5,
 ) -> FastAPI: ...
 ```
@@ -138,6 +139,7 @@ def create_agent_app(
 | `health_timeout` | `5.0` | Seconds, per feature check, on `/readyz` |
 | `error_handlers` | `None` | `(type, AgentError \| callable)` pairs, first match wins |
 | `usage_limits` | `None` | A `UsageLimits`, or a callable over `UserContext` |
+| `timeout` | `None` | Pydantic AI's run `timeout` in seconds, forwarded to every run; `None` leaves runs unbounded |
 | `vercel_sdk_version` | `5` | Vercel AI SDK major the `/chat` wire targets |
 
 An overload pairs `agent: Agent[DepsT, Any]` with `deps: DepsBuilder[DepsT]`,
@@ -215,6 +217,7 @@ Reserved, un-namespaced codes emitted by the package:
 | `model-unavailable` | 503 | Model backend returned 429 or 5xx, was unreachable, or every model of a `FallbackModel` failed; or a concurrency limit on the model or on the agent's runs turned the run away (`max_queued`) | yes |
 | `model-unauthorized` | 502 | Model backend returned 401 or 403 -- on every model of a `FallbackModel`, if one is used | no |
 | `model-refused` | 400 | The provider's content filter refused the request or the model's answer | no |
+| `run-timeout` | 504 | The run took longer than the app's `timeout` | yes |
 | `file-unsupported` | 415 | A file of a media type outside `accepts` on `GET /config`, refused before the run | no |
 | `internal` | 500 | Any unrecognized exception, or a handler that itself raised | no |
 
