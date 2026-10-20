@@ -97,9 +97,10 @@ Mid-stream on `/chat`, the HTTP status is a 200 whatever happens -- the run
 has begun streaming before it can fail. The failure travels in the body: a
 `data-error` chunk carrying the same `{code, message, retryable}` object,
 followed by an `ErrorChunk` with the safe message, or by the `abort` chunk a
-timed-out run ends with. A failure before the stream starts -- auth,
-validation, the `deps` builder -- is answered with a status like on `/run`. A
-malformed body or invalid extras is FastAPI's standard 422 on both endpoints.
+timed-out or cancelled run ends with. A failure before the stream starts --
+auth, validation, the `deps` builder -- is answered with a status like on
+`/run`. A malformed body or invalid extras is FastAPI's standard 422 on both
+endpoints.
 
 ## `create_agent`
 
@@ -218,6 +219,7 @@ Reserved, un-namespaced codes emitted by the package:
 | `model-unauthorized` | 502 | Model backend returned 401 or 403 -- on every model of a `FallbackModel`, if one is used | no |
 | `model-refused` | 400 | The provider's content filter refused the request or the model's answer | no |
 | `run-timeout` | 504 | The run took longer than the app's `timeout` | yes |
+| `run-cancelled` | 409 | Your own code stopped the run with `cancel()` | no |
 | `file-unsupported` | 415 | A file of a media type outside `accepts` on `GET /config`, refused before the run | no |
 | `internal` | 500 | Any unrecognized exception, or a handler that itself raised | no |
 

@@ -8,6 +8,7 @@ from pydantic_ai.exceptions import (
     FallbackExceptionGroup,
     ModelAPIError,
     ModelHTTPError,
+    RunCancelled,
     RunTimedOut,
 )
 
@@ -228,3 +229,10 @@ def test_a_run_past_its_timeout_is_run_timeout() -> None:
     # hung provider or tool, is transient.
     error = to_agent_error(RunTimedOut('The agent run timed out.'))
     assert (error.code, error.retryable, error.http_status) == ('run-timeout', True, 504)
+
+
+def test_a_deliberately_cancelled_run_is_run_cancelled() -> None:
+    # The app's own code asked for the stop, so a 4xx that logs at INFO; not retryable, because whatever
+    # stopped the run will likely stop it again.
+    error = to_agent_error(RunCancelled('The agent run was cancelled.'))
+    assert (error.code, error.retryable, error.http_status) == ('run-cancelled', False, 409)

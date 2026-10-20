@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from pydantic import TypeAdapter
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import AbstractCapability
-from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.exceptions import RunCancelled, UsageLimitExceeded
 from pydantic_ai.messages import (
     BinaryContent,
     FilePart,
@@ -447,8 +447,11 @@ def test_without_a_timeout_a_slow_run_finishes() -> None:
     assert 'abort' not in types
 
 
-def test_a_deliberate_cancellation_stays_a_plain_abort_on_chat() -> None:
-    # Only a timeout is a failure; a tool that cancels the run ends it on purpose.
+# --- cancellation ---
+
+
+def _cancelling_agent() -> Agent[AppDeps, str]:
+    # TestModel calls the tool, which stops the run the way a product's own code would.
     agent: Agent[AppDeps, str] = Agent(TestModel(), deps_type=AppDeps)
 
     @agent.tool
@@ -456,9 +459,37 @@ def test_a_deliberate_cancellation_stays_a_plain_abort_on_chat() -> None:
         ctx.cancel()
         return 'stopped'
 
-    chunks = _chunks(make_client(agent=agent).post('/chat', json=submit('hi')).text)
-    assert {'type': 'abort', 'reason': 'The agent run was cancelled.'} in chunks
-    assert all(chunk['type'] != 'data-error' for chunk in chunks)
+    return agent
+
+
+_CANCELLED = {'code': 'run-cancelled', 'message': 'The agent run was cancelled.', 'retryable': False}
+
+
+def test_a_cancelled_run_answers_409_and_logs_at_info(caplog: pytest.LogCaptureFixture) -> None:
+    # A stop the app's own code asked for is no fault, so it must not log at ERROR and page someone.
+    with caplog.at_level(logging.INFO):
+        resp = make_client(agent=_cancelling_agent()).post('/run', json={'prompt': 'hi'})
+    assert resp.status_code == 409
+    assert resp.json() == _CANCELLED
+    assert 'agent run rejected: run-cancelled' in caplog.text
+    assert all(record.levelno < logging.WARNING for record in caplog.records)
+
+
+def test_a_cancelled_chat_streams_the_error_envelope_before_the_abort() -> None:
+    chunks = _chunks(make_client(agent=_cancelling_agent()).post('/chat', json=submit('hi')).text)
+    assert [chunk for chunk in chunks if chunk['type'] in ('data-error', 'abort')] == [
+        {'type': 'data-error', 'data': _CANCELLED},
+        {'type': 'abort', 'reason': 'The agent run was cancelled.'},
+    ]
+
+
+def test_a_product_mapping_for_a_cancelled_run_reaches_both_transports() -> None:
+    blocked = AgentError('policy/blocked', 'This request is not allowed.', http_status=403)
+    client = make_client(agent=_cancelling_agent(), error_handlers=[(RunCancelled, blocked)])
+    resp = client.post('/run', json={'prompt': 'hi'})
+    assert (resp.status_code, resp.json()['code']) == (403, 'policy/blocked')
+    chunks = _chunks(client.post('/chat', json=submit('hi')).text)
+    assert [chunk['data']['code'] for chunk in chunks if chunk['type'] == 'data-error'] == ['policy/blocked']
 
 
 @dataclass(kw_only=True)

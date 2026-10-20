@@ -17,9 +17,9 @@ Raise `AgentError(code, message, retryable=..., http_status=...)` to surface a
 failure with a stable `code` the client can act on, instead of it being masked
 as a generic `internal` error. Namespace codes by feature; the un-namespaced
 codes `internal`, `model-unavailable`, `model-unauthorized`, `model-refused`,
-`run-timeout` and `file-unsupported` are reserved for this package. The
-`message` must be user-safe -- it is shown to the caller -- while the runner
-keeps an unrecognized error's detail in the log rather than leaking
+`run-timeout`, `run-cancelled` and `file-unsupported` are reserved for this
+package. The `message` must be user-safe -- it is shown to the caller -- while
+the runner keeps an unrecognized error's detail in the log rather than leaking
 `str(error)`.
 
 ```python
@@ -36,7 +36,7 @@ async def load_document(ctx: RunContext[AppDeps], document_id: str) -> str:
 
 ## The package's own codes
 
-Six codes are emitted without you raising anything. `model-unavailable`
+Seven codes are emitted without you raising anything. `model-unavailable`
 (503, retryable) is a transient provider failure: a 429, a 5xx, a connection
 error (before pydantic-ai 2.55, a dropped connection on Anthropic, Mistral and
 several other providers is `internal`, because pydantic-ai let the raw
@@ -52,12 +52,16 @@ retrying will not help. `model-refused` (400, not retryable) is the
 provider's content filter refusing the request or the model's answer; a
 retry of the same request is unlikely to help. `run-timeout` (504, retryable)
 is a run that took longer than the `timeout` passed to `create_agent_app`,
-usually because a provider or tool hung. `file-unsupported` (415, not retryable) is a
-file whose media type is outside what pydantic-ai classifies as an image,
-audio, video or document, refused before the run; `GET /config` lists the
-accepted types as `accepts`. Everything else is `internal` (500), including a model
-class raising for a class it does not support, see
-[Agent endpoints](agent-endpoints.md#the-new-turn).
+usually because a provider or tool hung. `run-cancelled` (409, not retryable)
+is a run your own code stopped with `ctx.cancel()` or `AgentRun.cancel()`, a
+4xx so it logs at INFO. `RunCancelled` carries no reason, so to tell the
+client why a run stopped, raise an `AgentError` (or an exception
+`error_handlers` maps) instead of cancelling; both transports deliver it.
+`file-unsupported` (415, not retryable) is a file whose media type is outside
+what pydantic-ai classifies as an image, audio, video or document, refused
+before the run; `GET /config` lists the accepted types as `accepts`.
+Everything else is `internal` (500), including a model class raising for a
+class it does not support, see [Agent endpoints](agent-endpoints.md#the-new-turn).
 
 The split is an approximation over HTTP status: Gemini reports a bad key as
 400 and OpenAI reports an exhausted balance as 429, neither distinguishable
@@ -93,11 +97,12 @@ one field whatever the status was. Mid-stream on `/chat` there is no status
 left to send, so the error arrives inside the stream instead: a
 machine-readable `data-error` chunk carrying the same `{code, message,
 retryable}` body, followed by an `ErrorChunk` with the safe message for SDK
-consumers that only understand that one. A timed-out run ends with an `abort`
-chunk in place of the `ErrorChunk`, which `useChat` does not report as an
-error, so the `data-error` chunk ahead of it is what tells the client the run
-failed. A failure *before* the stream starts -- a refused file, or your `deps`
-builder raising -- is answered as JSON with its status on `/chat` as well.
+consumers that only understand that one. A timed-out or cancelled run ends
+with an `abort` chunk in place of the `ErrorChunk`, which `useChat` does not
+report as an error, so the `data-error` chunk ahead of it is what tells the
+client why the run stopped. A failure *before* the stream starts -- a refused
+file, or your `deps` builder raising -- is answered as JSON with its status on
+`/chat` as well.
 
 Invalid request bodies never reach the contract at all: a malformed body or
 invalid extras is FastAPI's standard 422, in the same shape on both endpoints.

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing import Any
 
-from pydantic_ai.exceptions import RunCancelled, RunTimedOut
+from pydantic_ai.exceptions import RunCancelled
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter, VercelAIEventStream
 from pydantic_ai.ui.vercel_ai.response_types import BaseChunk, DataChunk, ErrorChunk
 from starlette.requests import Request
@@ -41,12 +41,11 @@ class VercelEventStream(VercelAIEventStream[AppDeps, Any]):
                 yield chunk
 
     async def on_cancelled(self, cancelled: RunCancelled) -> AsyncIterator[BaseChunk]:
-        if isinstance(cancelled, RunTimedOut):
-            # The base ends the stream with an `abort` chunk, which `useChat` does not report as an
-            # error; the `data-error` chunk ahead of it tells the client the run failed.
-            agent_error = to_agent_error(cancelled, self.error_handlers)
-            log_agent_error(agent_error, cancelled, 'agent run')
-            yield DataChunk(type='data-error', data=error_body(agent_error))
+        # The base ends the stream with an `abort` chunk, which `useChat` does not report as an error;
+        # the `data-error` chunk ahead of it tells the client why the run stopped, as `/run` would.
+        agent_error = to_agent_error(cancelled, self.error_handlers)
+        log_agent_error(agent_error, cancelled, 'agent run')
+        yield DataChunk(type='data-error', data=error_body(agent_error))
         async for chunk in super().on_cancelled(cancelled):
             yield chunk
 
