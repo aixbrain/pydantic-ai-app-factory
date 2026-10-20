@@ -13,6 +13,8 @@ from pydantic_ai.exceptions import (
     FallbackExceptionGroup,
     ModelAPIError,
     ModelHTTPError,
+    RunCancelled,
+    RunTimedOut,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,7 +34,8 @@ class AgentError(Exception):
     """Stable identifier the caller keys on.
 
     Un-namespaced codes (`internal`, `model-unavailable`, `model-unauthorized`, `model-refused`,
-    `file-unsupported`) are reserved for this package; features and products namespace theirs as `<feature>/<code>`.
+    `run-timeout`, `run-cancelled`, `file-unsupported`) are reserved for this package; features and
+    products namespace theirs as `<feature>/<code>`.
     """
     message: str
     """Human-readable text safe to show the caller."""
@@ -70,7 +73,8 @@ def to_agent_error(exc: Exception, error_handlers: ErrorHandlers | None = None) 
     The first `error_handlers` entry whose type matches translates it, to a fixed `AgentError` or a
     callable that derives one from the exception. An `AgentError` otherwise passes through; a model
     provider rejecting the credentials maps to `model-unauthorized`; its content filter refusing maps to
-    `model-refused`; a transient model-backend failure or a full concurrency queue maps to
+    `model-refused`; a run past its `timeout` maps to `run-timeout` and any other cancellation to
+    `run-cancelled`; a transient model-backend failure or a full concurrency queue maps to
     `model-unavailable`; anything else becomes a generic `internal` error so no unrecognized exception
     leaks its message to the caller.
 
@@ -101,6 +105,15 @@ def to_agent_error(exc: Exception, error_handlers: ErrorHandlers | None = None) 
         # Not retryable, because a retry of the same request is unlikely to help. A 4xx because the remedy is
         # usually a different request, and so the refusal logs at INFO, since nothing in the deployment needs attention.
         return AgentError('model-refused', 'The model provider declined to answer this request.', http_status=400)
+    if isinstance(exc, RunTimedOut):
+        # 504 because the run exceeded the deployment's time limit, retryable because the usual cause, a
+        # hung provider or tool, is transient.
+        return AgentError('run-timeout', 'The agent run timed out.', retryable=True, http_status=504)
+    if isinstance(exc, RunCancelled):
+        # The app's own code stopped the run on purpose. A 4xx so it logs at INFO instead of paging anyone,
+        # 409 because no status fits a deliberate stop better, and not retryable because whatever stopped
+        # the run will likely stop it again.
+        return AgentError('run-cancelled', 'The agent run was cancelled.', http_status=409)
     if _model_backend_unavailable(exc):
         return AgentError('model-unavailable', 'The model is temporarily unavailable.', retryable=True)
     return AgentError('internal', 'An internal error occurred.')

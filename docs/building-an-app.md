@@ -21,6 +21,7 @@ def create_agent_app(
     vercel_sdk_version: VercelSdkVersion = 5,  # Vercel AI SDK major `/chat` targets
     error_handlers: ErrorHandlers | None = None,  # maps exceptions to AgentErrors
     usage_limits: UsageLimitsSource = None,  # Pydantic AI's, forwarded to every run
+    timeout: float | None = None,  # Pydantic AI's, forwarded to every run
 ) -> FastAPI: ...
 ```
 
@@ -46,9 +47,21 @@ The three parameters related to Features are covered in the next section. The ot
 - **`usage_limits`** is Pydantic AI's
   [`UsageLimits`](https://pydantic.dev/docs/ai/core-concepts/agent/#usage-limits),
   fixed or resolved per caller.
+- **`timeout`** is Pydantic AI's
+  [run `timeout`](https://pydantic.dev/docs/ai/core-concepts/timeouts/#bounding-a-whole-run)
+  in seconds, forwarded to every run. Without one, a run holds its request
+  open for as long as a provider or tool hangs; a run past it ends as the
+  `run-timeout` error.
 - **`vercel_sdk_version`** is the Vercel AI SDK major `/chat` targets. It
   stays at pydantic-ai's default of 5; raise it to match a frontend on a
   later SDK.
+
+The app enters the agent (`async with agent`) while it serves, so the models
+it runs keep their HTTP clients across runs and close them on shutdown. That
+also starts the agent's MCP toolsets at startup, where an unreachable server
+fails the app, and ties the clients to the server's event loop, so the same
+agent must not also run through `run_sync()` in a worker thread such as a
+`def` endpoint.
 
 ### Example App (without Features)
 

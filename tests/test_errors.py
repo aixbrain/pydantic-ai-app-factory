@@ -8,6 +8,8 @@ from pydantic_ai.exceptions import (
     FallbackExceptionGroup,
     ModelAPIError,
     ModelHTTPError,
+    RunCancelled,
+    RunTimedOut,
 )
 
 from pydantic_ai_app_factory import AgentError
@@ -220,3 +222,17 @@ def test_a_content_filter_refusal_is_model_refused_not_internal() -> None:
     error = to_agent_error(ContentFilterError('filtered'))
     assert (error.code, error.retryable, error.http_status) == ('model-refused', False, 400)
     assert 'filtered' not in error.message
+
+
+def test_a_run_past_its_timeout_is_run_timeout() -> None:
+    # 504 because the run exceeded the deployment's time limit; retryable because the usual cause, a
+    # hung provider or tool, is transient.
+    error = to_agent_error(RunTimedOut('The agent run timed out.'))
+    assert (error.code, error.retryable, error.http_status) == ('run-timeout', True, 504)
+
+
+def test_a_deliberately_cancelled_run_is_run_cancelled() -> None:
+    # The app's own code asked for the stop, so a 4xx that logs at INFO; not retryable, because whatever
+    # stopped the run will likely stop it again.
+    error = to_agent_error(RunCancelled('The agent run was cancelled.'))
+    assert (error.code, error.retryable, error.http_status) == ('run-cancelled', False, 409)

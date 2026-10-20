@@ -1,6 +1,8 @@
+import asyncio
 import json
 import logging
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,7 +12,7 @@ from fastapi.testclient import TestClient
 from pydantic import TypeAdapter
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import AbstractCapability
-from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.exceptions import RunCancelled, UsageLimitExceeded
 from pydantic_ai.messages import (
     BinaryContent,
     FilePart,
@@ -391,6 +393,103 @@ def test_usage_limit_errors_can_map_to_429_via_error_handlers() -> None:
     resp = client.post('/run', json={'prompt': 'hi'})
     assert resp.status_code == 429
     assert resp.json()['code'] == 'limits/requests'
+
+
+# --- run timeout ---
+
+
+def _slow_agent(delay: float) -> Agent[AppDeps, str]:
+    # A model that answers only after `delay` seconds, on both transports.
+    async def reply(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        await asyncio.sleep(delay)
+        return ModelResponse(parts=[TextPart('done')])
+
+    async def stream(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        await asyncio.sleep(delay)
+        yield 'done'
+
+    return Agent(FunctionModel(reply, stream_function=stream), deps_type=AppDeps)
+
+
+def _chunks(sse: str) -> list[dict[str, Any]]:
+    return [json.loads(line.removeprefix('data: ')) for line in sse.splitlines() if line.startswith('data: {')]
+
+
+_TIMED_OUT = {'code': 'run-timeout', 'message': 'The agent run timed out.', 'retryable': True}
+
+
+def test_a_run_past_its_timeout_answers_the_run_timeout_envelope() -> None:
+    resp = make_client(agent=_slow_agent(5), timeout=0.05).post('/run', json={'prompt': 'hi'})
+    assert resp.status_code == 504
+    assert resp.json() == _TIMED_OUT
+
+
+def test_a_chat_past_its_timeout_streams_the_error_envelope_before_the_abort(caplog: pytest.LogCaptureFixture) -> None:
+    # `useChat` does not report the `abort` chunk as an error; the `data-error` chunk ahead of it is
+    # how the client learns that the run failed and may be retried.
+    with caplog.at_level(logging.WARNING):
+        resp = make_client(agent=_slow_agent(5), timeout=0.05).post('/chat', json=submit('hi'))
+    assert [chunk for chunk in _chunks(resp.text) if chunk['type'] in ('data-error', 'abort')] == [
+        {'type': 'data-error', 'data': _TIMED_OUT},
+        {'type': 'abort', 'reason': 'The agent run timed out.'},
+    ]
+    assert 'agent run failed transiently: run-timeout' in caplog.text
+
+
+def test_without_a_timeout_a_slow_run_finishes() -> None:
+    # The same delay trips a shorter timeout, so the runs below finish because none is applied.
+    agent = _slow_agent(0.1)
+    assert make_client(agent=agent, timeout=0.01).post('/run', json={'prompt': 'hi'}).status_code == 504
+    client = make_client(agent=agent)
+    assert client.post('/run', json={'prompt': 'hi'}).json()['output'] == 'done'
+    types = [chunk['type'] for chunk in _chunks(client.post('/chat', json=submit('hi')).text)]
+    assert 'finish' in types
+    assert 'abort' not in types
+
+
+# --- cancellation ---
+
+
+def _cancelling_agent() -> Agent[AppDeps, str]:
+    # TestModel calls the tool, which stops the run the way a product's own code would.
+    agent: Agent[AppDeps, str] = Agent(TestModel(), deps_type=AppDeps)
+
+    @agent.tool
+    async def stop(ctx: RunContext[AppDeps]) -> str:
+        ctx.cancel()
+        return 'stopped'
+
+    return agent
+
+
+_CANCELLED = {'code': 'run-cancelled', 'message': 'The agent run was cancelled.', 'retryable': False}
+
+
+def test_a_cancelled_run_answers_409_and_logs_at_info(caplog: pytest.LogCaptureFixture) -> None:
+    # A stop the app's own code asked for is no fault, so it must not log at ERROR and page someone.
+    with caplog.at_level(logging.INFO):
+        resp = make_client(agent=_cancelling_agent()).post('/run', json={'prompt': 'hi'})
+    assert resp.status_code == 409
+    assert resp.json() == _CANCELLED
+    assert 'agent run rejected: run-cancelled' in caplog.text
+    assert all(record.levelno < logging.WARNING for record in caplog.records)
+
+
+def test_a_cancelled_chat_streams_the_error_envelope_before_the_abort() -> None:
+    chunks = _chunks(make_client(agent=_cancelling_agent()).post('/chat', json=submit('hi')).text)
+    assert [chunk for chunk in chunks if chunk['type'] in ('data-error', 'abort')] == [
+        {'type': 'data-error', 'data': _CANCELLED},
+        {'type': 'abort', 'reason': 'The agent run was cancelled.'},
+    ]
+
+
+def test_a_product_mapping_for_a_cancelled_run_reaches_both_transports() -> None:
+    blocked = AgentError('policy/blocked', 'This request is not allowed.', http_status=403)
+    client = make_client(agent=_cancelling_agent(), error_handlers=[(RunCancelled, blocked)])
+    resp = client.post('/run', json={'prompt': 'hi'})
+    assert (resp.status_code, resp.json()['code']) == (403, 'policy/blocked')
+    chunks = _chunks(client.post('/chat', json=submit('hi')).text)
+    assert [chunk['data']['code'] for chunk in chunks if chunk['type'] == 'data-error'] == ['policy/blocked']
 
 
 @dataclass(kw_only=True)
