@@ -128,6 +128,8 @@ def create_agent_app(
     capabilities = [capability for feature in features for capability in feature.capabilities()]
 
     # Chain the feature lifespans on one stack: they open in order and close in reverse on shutdown.
+    # The agent is entered last, so the models it runs keep their HTTP clients for the app's lifetime
+    # and close them before the infrastructure the features opened.
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         async with AsyncExitStack() as stack:
@@ -135,6 +137,7 @@ def create_agent_app(
                 context = feature.lifespan(app)
                 if context is not None:
                     await stack.enter_async_context(context)
+            await stack.enter_async_context(agent)
             yield
 
     app = FastAPI(lifespan=lifespan)

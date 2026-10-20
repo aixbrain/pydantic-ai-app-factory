@@ -56,6 +56,13 @@ The three parameters related to Features are covered in the next section. The ot
   stays at pydantic-ai's default of 5; raise it to match a frontend on a
   later SDK.
 
+The app enters the agent (`async with agent`) while it serves, so the models
+it runs keep their HTTP clients across runs and close them on shutdown. That
+also starts the agent's MCP toolsets at startup, where an unreachable server
+fails the app, and ties the clients to the server's event loop, so the same
+agent must not also run through `run_sync()` in a worker thread such as a
+`def` endpoint.
+
 ### Example App (without Features)
 
 ```python

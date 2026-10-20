@@ -1,7 +1,8 @@
 from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
-from types import NoneType
+from types import NoneType, TracebackType
+from typing import Self
 
 import pytest
 from fastapi import APIRouter, FastAPI, Request, WebSocket
@@ -267,6 +268,41 @@ def test_feature_lifespans_run_on_startup_and_shutdown() -> None:
     with make_client(features=[_Pooled(), Storage()]):
         assert events == ['start']  # startup entered the feature lifespan
     assert events == ['start', 'stop']  # shutdown exited it
+
+
+def test_the_agent_is_entered_for_the_apps_lifetime() -> None:
+    # Entered once, the agent's model keeps its HTTP client across runs. It opens after the feature
+    # lifespans and closes before them, so it never runs without the infrastructure they provide.
+    events: list[str] = []
+
+    class _TrackedModel(TestModel):
+        async def __aenter__(self) -> Self:
+            events.append('model enter')
+            return await super().__aenter__()
+
+        async def __aexit__(
+            self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
+        ) -> bool | None:
+            events.append('model exit')
+            return await super().__aexit__(exc_type, exc_val, exc_tb)
+
+    @asynccontextmanager
+    async def _pool() -> AsyncGenerator[None]:
+        events.append('pool open')
+        yield
+        events.append('pool close')
+
+    class _Pooled(Feature):
+        name = 'pooled'
+
+        def lifespan(self, app: FastAPI) -> AbstractAsyncContextManager[None] | None:
+            return _pool()
+
+    with make_client(agent=create_agent(_TrackedModel()), features=[_Pooled()]) as client:
+        assert events == ['pool open', 'model enter']
+        assert client.get('/readyz').status_code == 200
+        assert client.post('/run', json={'prompt': 'hi'}).status_code == 200
+    assert events == ['pool open', 'model enter', 'model exit', 'pool close']
 
 
 # --- deps_type guard ---
