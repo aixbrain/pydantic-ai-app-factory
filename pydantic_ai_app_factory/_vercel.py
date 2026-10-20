@@ -68,5 +68,6 @@ class VercelAdapter(VercelAIAdapter[AppDeps, Any]):
             accept=self.accept,
             sdk_version=self.sdk_version,
             server_message_id=self.server_message_id,
+            manage_system_prompt=self.manage_system_prompt,
             error_handlers=self.error_handlers,
         )

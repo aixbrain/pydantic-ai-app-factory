@@ -561,3 +561,11 @@ def _sdk_version_reaching_the_adapter(monkeypatch: pytest.MonkeyPatch, **kwargs:
     monkeypatch.setattr(VercelAdapter, 'build_event_stream', spy)
     make_client(**kwargs).post('/chat', json=submit('hi'))
     return seen[0]
+
+
+def test_the_event_stream_keeps_the_adapters_system_prompt_owner() -> None:
+    # The stream uses it to decide whether enqueued system prompts reach the client. Without it the
+    # stream defaults to 'server' and withholds them.
+    run_input = VercelAdapter.build_run_input(json.dumps(submit('hi')).encode())
+    adapter = VercelAdapter(agent=Agent(TestModel()), run_input=run_input, manage_system_prompt='client')
+    assert adapter.build_event_stream().manage_system_prompt == 'client'
