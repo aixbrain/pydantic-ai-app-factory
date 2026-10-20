@@ -22,7 +22,7 @@ dependencies = [
     # 0.137 is the first release whose `include_router` keeps a feature router's mounts.
     "fastapi>=0.137",
     # 2.57 is the first release whose `ModelMessage` schema is valid OpenAPI, so `/openapi.json` can describe the `/run` message fields.
-    "pydantic-ai-slim>=2.57,<3",
+    "pydantic-ai-slim>=2.58,<3",
 ]
 
 [project.optional-dependencies]
