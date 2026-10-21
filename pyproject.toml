@@ -21,8 +21,8 @@ classifiers = [
 dependencies = [
     # 0.137 is the first release whose `include_router` keeps a feature router's mounts.
     "fastapi>=0.137",
-    # 2.57 is the first release whose `ModelMessage` schema is valid OpenAPI, so `/openapi.json` can describe the `/run` message fields.
-    "pydantic-ai-slim>=2.58,<3",
+    # 2.59 is the first release with the model error categories that `to_agent_error` maps to their own codes.
+    "pydantic-ai-slim>=2.59,<3",
 ]
 
 [project.optional-dependencies]

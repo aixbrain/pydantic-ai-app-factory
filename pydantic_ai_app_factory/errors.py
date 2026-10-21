@@ -12,7 +12,9 @@ from pydantic_ai.exceptions import (
     ContentFilterError,
     FallbackExceptionGroup,
     ModelAPIError,
+    ModelContextWindowExceededError,
     ModelHTTPError,
+    ModelQuotaExceededError,
     RunCancelled,
     RunTimedOut,
 )
@@ -33,9 +35,9 @@ class AgentError(Exception):
     code: str
     """Stable identifier the caller keys on.
 
-    Un-namespaced codes (`internal`, `model-unavailable`, `model-unauthorized`, `model-refused`,
-    `run-timeout`, `run-cancelled`, `file-unsupported`) are reserved for this package; features and
-    products namespace theirs as `<feature>/<code>`.
+    Un-namespaced codes (`internal`, `model-unavailable`, `model-unauthorized`, `model-quota-exceeded`,
+    `model-context-exceeded`, `model-refused`, `run-timeout`, `run-cancelled`, `file-unsupported`) are
+    reserved for this package; features and products namespace theirs as `<feature>/<code>`.
     """
     message: str
     """Human-readable text safe to show the caller."""
@@ -72,11 +74,12 @@ def to_agent_error(exc: Exception, error_handlers: ErrorHandlers | None = None) 
 
     The first `error_handlers` entry whose type matches translates it, to a fixed `AgentError` or a
     callable that derives one from the exception. An `AgentError` otherwise passes through; a model
-    provider rejecting the credentials maps to `model-unauthorized`; its content filter refusing maps to
-    `model-refused`; a run past its `timeout` maps to `run-timeout` and any other cancellation to
-    `run-cancelled`; a transient model-backend failure or a full concurrency queue maps to
-    `model-unavailable`; anything else becomes a generic `internal` error so no unrecognized exception
-    leaks its message to the caller.
+    provider rejecting the credentials maps to `model-unauthorized`, an exhausted quota to
+    `model-quota-exceeded`, a request too long for the model's context window to `model-context-exceeded`
+    and the provider's content filter refusing to `model-refused`; a run past its `timeout` maps to
+    `run-timeout` and any other cancellation to `run-cancelled`; a transient model-backend failure or a
+    full concurrency queue maps to `model-unavailable`; anything else becomes a generic `internal` error
+    so no unrecognized exception leaks its message to the caller.
 
     This is total: a callable handler that itself raises falls back to `internal` rather than escape as
     an unhandled exception, so a buggy handler cannot break the no-leak contract.
@@ -101,6 +104,14 @@ def to_agent_error(exc: Exception, error_handlers: ErrorHandlers | None = None) 
         # non-retryable 5xx at ERROR with a traceback on every such request; that is deliberate here
         # too -- the deployment is misconfigured and needs attention, even though the fault is upstream.
         return AgentError('model-unauthorized', 'The model provider rejected the credentials.', http_status=502)
+    if _every_failure_is(exc, ModelQuotaExceededError):
+        # 502 and not retryable like `model-unauthorized`: the account stays empty until someone tops it up,
+        # and the deployment needs attention. A 402 would tell the end user to pay.
+        return AgentError('model-quota-exceeded', 'The model provider account is out of quota.', http_status=502)
+    if _every_failure_is(exc, ModelContextWindowExceededError):
+        # A 4xx so it logs at INFO, because the remedy is a shorter history or a new conversation, and not
+        # retryable, because the same request overflows again. Avoiding the overflow is the agent's job.
+        return AgentError('model-context-exceeded', 'The conversation is too long for the model.', http_status=413)
     if isinstance(exc, ContentFilterError):
         # Not retryable, because a retry of the same request is unlikely to help. A 4xx because the remedy is
         # usually a different request, and so the refusal logs at INFO, since nothing in the deployment needs attention.
@@ -119,19 +130,31 @@ def to_agent_error(exc: Exception, error_handlers: ErrorHandlers | None = None) 
     return AgentError('internal', 'An internal error occurred.')
 
 
+def _failures(exc: Exception) -> Sequence[Exception]:
+    """The failure, or with `FallbackModel` the failure of every model that was tried."""
+    return exc.exceptions if isinstance(exc, FallbackExceptionGroup) else (exc,)
+
+
 def _provider_rejected_credentials(exc: Exception) -> bool:
     """Whether the model provider refused the deployment's credentials, on every model that was tried.
 
-    An approximation over HTTP status, because providers pass their raw status through: most report a
-    bad key as 401 (OpenAI, Anthropic, Azure, Groq, Mistral), some as 403 (Bedrock, Vertex on a missing
-    IAM permission). Two cases are out of reach without reading the response body, which this package
-    deliberately does not do -- Gemini reports a bad key as 400, and OpenAI reports an exhausted balance
-    as 429; map those in `error_handlers` if a product needs them. With `FallbackModel` the group has
-    to be credential failures throughout: one model down and another rejecting the key is still an
-    outage worth retrying.
+    An approximation over HTTP status, because providers pass their raw status through and pydantic-ai
+    has no error category for it: most report a bad key as 401 (OpenAI, Anthropic, Azure, Groq, Mistral),
+    some as 403 (Bedrock, Vertex on a missing IAM permission). Gemini reports a bad key as 400, out of
+    reach without reading the response body, which this package deliberately does not do; map it in
+    `error_handlers` if a product needs it. With `FallbackModel` the group has to be credential failures
+    throughout: one model down and another rejecting the key is still an outage worth retrying.
     """
-    failures = exc.exceptions if isinstance(exc, FallbackExceptionGroup) else (exc,)
-    return all(isinstance(e, ModelHTTPError) and e.status_code in (401, 403) for e in failures)
+    return all(isinstance(e, ModelHTTPError) and e.status_code in (401, 403) for e in _failures(exc))
+
+
+def _every_failure_is(exc: Exception, category: type[ModelAPIError]) -> bool:
+    """Whether pydantic-ai put the failure in `category`, on every model that was tried, as for credentials.
+
+    pydantic-ai sets a category only when the provider's error names the cause, so a plain
+    `ModelHTTPError` falls through to the status rules.
+    """
+    return all(isinstance(e, category) for e in _failures(exc))
 
 
 def _model_backend_unavailable(exc: Exception) -> bool:
