@@ -16,7 +16,8 @@ exit. The reserved codes the package emits itself are listed in the
 Raise `AgentError(code, message, retryable=..., http_status=...)` to surface a
 failure with a stable `code` the client can act on, instead of it being masked
 as a generic `internal` error. Namespace codes by feature; the un-namespaced
-codes `internal`, `model-unavailable`, `model-unauthorized`, `model-refused`,
+codes `internal`, `model-unavailable`, `model-unauthorized`,
+`model-quota-exceeded`, `model-context-exceeded`, `model-refused`,
 `run-timeout`, `run-cancelled` and `file-unsupported` are reserved for this
 package. The `message` must be user-safe -- it is shown to the caller -- while
 the runner keeps an unrecognized error's detail in the log rather than leaking
@@ -36,19 +37,23 @@ async def load_document(ctx: RunContext[AppDeps], document_id: str) -> str:
 
 ## The package's own codes
 
-Seven codes are emitted without you raising anything. `model-unavailable`
+Nine codes are emitted without you raising anything. `model-unavailable`
 (503, retryable) is a transient provider failure: a 429, a 5xx, a connection
-error (before pydantic-ai 2.55, a dropped connection on Anthropic, Mistral and
-several other providers is `internal`, because pydantic-ai let the raw
-transport error through), or every model of a `FallbackModel` failing --
-whatever the individual failures were, unless every one of them was a
-credential rejection. It also covers a concurrency limit's `max_queued`
-turning the run away, whether the limit sits on the model or on the agent's
-runs; the client answers that the same way, by retrying later.
+error, or every model of a `FallbackModel` failing -- whatever the individual
+failures were, unless all of them were credential rejections, all exhausted
+quotas or all context overflows. It also covers a concurrency limit's
+`max_queued` turning the run away, whether the limit sits on the model or on
+the agent's runs; the client answers that the same way, by retrying later.
 `model-unauthorized` (502, not retryable) is the provider rejecting the
 deployment's credentials -- a 401 or 403, or every model of a `FallbackModel`
 reporting one -- which is a configuration error, not a bug in your code, and
-retrying will not help. `model-refused` (400, not retryable) is the
+retrying will not help. `model-quota-exceeded` (502, not retryable) is the
+provider reporting the account's quota, credits or billing exhausted, even
+when it sends a 429, and needs the same attention. `model-context-exceeded`
+(413, not retryable) is a request longer than the model's context window, a
+4xx so it logs at INFO; the client sends a shorter history or starts a new
+conversation, and keeping the history short, for example by compaction, is up
+to the agent. `model-refused` (400, not retryable) is the
 provider's content filter refusing the request or the model's answer; a
 retry of the same request is unlikely to help. `run-timeout` (504, retryable)
 is a run that took longer than the `timeout` passed to `create_agent_app`,
@@ -63,11 +68,12 @@ before the run; `GET /config` lists the accepted types as `accepts`.
 Everything else is `internal` (500), including a model class raising for a
 class it does not support, see [Agent endpoints](agent-endpoints.md#the-new-turn).
 
-The split is an approximation over HTTP status: Gemini reports a bad key as
-400 and OpenAI reports an exhausted balance as 429, neither distinguishable
-from a genuine bad request or rate limit without reading the response body,
-which the runner deliberately does not do. Translate those in
-`error_handlers` if you need them.
+An exhausted quota and a context overflow are recognized when pydantic-ai
+raises `ModelQuotaExceededError` or `ModelContextWindowExceededError`, which
+it does when the provider's error names the cause; everything else is split
+by HTTP status. Gemini reports a bad key as 400, indistinguishable from a
+genuine bad request without reading the response body, which the runner
+deliberately does not do; translate it in `error_handlers` if you need it.
 
 ## Choosing a status
 

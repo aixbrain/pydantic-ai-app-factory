@@ -7,7 +7,14 @@ from pydantic_ai.exceptions import (
     ContentFilterError,
     FallbackExceptionGroup,
     ModelAPIError,
+    ModelConnectionError,
+    ModelContextWindowExceededError,
     ModelHTTPError,
+    ModelOverloadedError,
+    ModelQuotaExceededError,
+    ModelRateLimitError,
+    ModelRequestTimeout,
+    ModelServerError,
     RunCancelled,
     RunTimedOut,
 )
@@ -183,9 +190,106 @@ def test_a_401_from_a_tools_own_http_client_stays_internal() -> None:
 
 
 def test_a_rate_limit_stays_a_retryable_outage_not_a_credential_rejection() -> None:
-    # OpenAI reports an exhausted balance as 429 too; without the body it is indistinguishable from
-    # a rate limit, so it stays retryable and is left to `error_handlers` -- as the docs promise.
+    # A 429 that pydantic-ai did not mark as an exhausted quota is a rate limit as far as the status
+    # tells, so the caller retries later.
     error = to_agent_error(ModelHTTPError(status_code=429, model_name='m'))
+    assert (error.code, error.retryable) == ('model-unavailable', True)
+
+
+@pytest.mark.parametrize(
+    'exc',
+    [
+        ModelHTTPError.for_category(ModelRateLimitError, status_code=429, model_name='m'),
+        ModelHTTPError.for_category(ModelOverloadedError, status_code=529, model_name='m'),
+        ModelHTTPError.for_category(ModelServerError, status_code=500, model_name='m'),
+        ModelConnectionError(model_name='m', message='connection reset'),
+        ModelRequestTimeout(model_name='m', timeout=30),
+    ],
+)
+def test_the_transient_model_error_categories_stay_model_unavailable(exc: Exception) -> None:
+    # The caller answers all of these by retrying later, so none needs a code of its own.
+    error = to_agent_error(exc)
+    assert (error.code, error.retryable, error.http_status) == ('model-unavailable', True, 503)
+
+
+def test_a_context_window_overflow_is_model_context_exceeded_not_internal() -> None:
+    # The remedy is a shorter history or a new conversation, so a 4xx that logs at INFO rather than a
+    # 500 with a traceback; not retryable, because the same request overflows again.
+    exc = ModelHTTPError.for_category(ModelContextWindowExceededError, status_code=400, model_name='m')
+    error = to_agent_error(exc)
+    assert (error.code, error.retryable, error.http_status) == ('model-context-exceeded', False, 413)
+
+
+def test_an_overflow_reported_without_a_status_is_model_context_exceeded_too() -> None:
+    # pydantic-ai raises the bare category when the error came without an HTTP status, e.g. in a stream.
+    error = to_agent_error(ModelContextWindowExceededError(model_name='m', message='too long'))
+    assert error.code == 'model-context-exceeded'
+
+
+def test_an_exhausted_quota_on_a_429_is_not_retryable() -> None:
+    # OpenAI sends `insufficient_quota` as a 429, like a rate limit, but a retry against an empty account
+    # fails again. 502 like `model-unauthorized`, because the deployment needs attention.
+    exc = ModelHTTPError.for_category(ModelQuotaExceededError, status_code=429, model_name='m')
+    error = to_agent_error(exc)
+    assert (error.code, error.retryable, error.http_status) == ('model-quota-exceeded', False, 502)
+
+
+@pytest.mark.parametrize('status_code', [400, 402])
+def test_an_exhausted_quota_on_a_4xx_is_model_quota_exceeded_not_internal(status_code: int) -> None:
+    # Anthropic reports `billing_error` as 400; a 402 is an exhausted quota by its status alone.
+    exc = ModelHTTPError.for_category(ModelQuotaExceededError, status_code=status_code, model_name='m')
+    assert to_agent_error(exc).code == 'model-quota-exceeded'
+
+
+def test_every_fallback_model_overflowing_is_model_context_exceeded() -> None:
+    group = FallbackExceptionGroup(
+        'all failed',
+        [
+            ModelHTTPError.for_category(ModelContextWindowExceededError, status_code=400, model_name='a'),
+            ModelContextWindowExceededError(model_name='b', message='too long'),
+        ],
+    )
+    error = to_agent_error(group)
+    assert (error.code, error.retryable) == ('model-context-exceeded', False)
+
+
+def test_every_fallback_model_out_of_quota_is_model_quota_exceeded() -> None:
+    group = FallbackExceptionGroup(
+        'all failed',
+        [
+            ModelHTTPError.for_category(ModelQuotaExceededError, status_code=429, model_name='a'),
+            ModelHTTPError.for_category(ModelQuotaExceededError, status_code=402, model_name='b'),
+        ],
+    )
+    error = to_agent_error(group)
+    assert (error.code, error.retryable) == ('model-quota-exceeded', False)
+
+
+@pytest.mark.parametrize(
+    'second',
+    [
+        ModelHTTPError.for_category(ModelContextWindowExceededError, status_code=400, model_name='b'),
+        ModelHTTPError(status_code=401, model_name='b'),
+        ModelHTTPError(status_code=503, model_name='b'),
+    ],
+)
+def test_a_fallback_group_mixing_quota_with_another_failure_stays_a_retryable_outage(second: Exception) -> None:
+    # As with credentials, a code of its own needs the same cause on every model that was tried.
+    first = ModelHTTPError.for_category(ModelQuotaExceededError, status_code=429, model_name='a')
+    error = to_agent_error(FallbackExceptionGroup('all failed', [first, second]))
+    assert (error.code, error.retryable) == ('model-unavailable', True)
+
+
+def test_a_fallback_group_mixing_an_overflow_with_an_outage_stays_a_retryable_outage() -> None:
+    # A model that is down may come back with a context window large enough for the request.
+    group = FallbackExceptionGroup(
+        'all failed',
+        [
+            ModelHTTPError.for_category(ModelContextWindowExceededError, status_code=400, model_name='a'),
+            ModelHTTPError(status_code=503, model_name='b'),
+        ],
+    )
+    error = to_agent_error(group)
     assert (error.code, error.retryable) == ('model-unavailable', True)
 
 

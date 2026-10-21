@@ -309,8 +309,9 @@ feature touches:
 
 A base class that lists `ABC` in its own bases stays abstract and needs no
 `name`. Un-namespaced error codes (`internal`, `model-unavailable`,
-`model-unauthorized`, `model-refused`, `run-timeout`, `run-cancelled`,
-`file-unsupported`) are reserved for the package.
+`model-unauthorized`, `model-quota-exceeded`, `model-context-exceeded`,
+`model-refused`, `run-timeout`, `run-cancelled`, `file-unsupported`) are
+reserved for the package.
 
 Composition fails loud, at build time, with a `ValueError`: an agent whose
 `deps_type` the factory cannot serve, duplicate feature names, extras fields
