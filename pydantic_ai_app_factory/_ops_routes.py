@@ -17,15 +17,20 @@ logger = logging.getLogger(__name__)
 
 
 def ops_router(
-    features: Sequence[Feature], auth: AuthProvider, extras_model: type[BaseModel], health_timeout: float
+    features: Sequence[Feature],
+    auth: AuthProvider,
+    extras_model: type[BaseModel],
+    health_timeout: float,
+    title: str | None,
 ) -> APIRouter:
     """The `/config`, `/config/features`, `/healthz`, and `/readyz` endpoints."""
     router = APIRouter()
 
     @router.get('/config')
     def config() -> dict[str, Any]:
-        """The composed feature set, the extras schema it accepts, and the media types a file may have."""
+        """The app's title, its feature set, the extras schema it accepts, and the media types a file may have."""
         return {
+            'title': title,
             'features': [f.name for f in features],
             'extras_schema': extras_model.model_json_schema(),
             'accepts': sorted(ACCEPTED_MEDIA_TYPES),

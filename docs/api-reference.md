@@ -9,7 +9,7 @@ Signatures, defaults, and wire shapes. For what these are *for*, see
 |---|---|---|
 | `/chat` | POST | Vercel AI chat protocol, streaming |
 | `/run` | POST | Plain JSON `{prompt?, conversation_id?, message_history?, extras?}` -> `{output, conversation_id, run_id, messages}` |
-| `/config` | GET | Feature list, composed extras JSON schema and accepted file media types |
+| `/config` | GET | App title, feature list, composed extras JSON schema and accepted file media types |
 | `/config/features` | GET | How each feature is configured, from `Feature.config()` |
 | `/healthz` | GET | Liveness: the process is up, no external dependency checked |
 | `/readyz` | GET | Readiness: every feature's `health()`, 503 when any fails |
@@ -18,9 +18,9 @@ Signatures, defaults, and wire shapes. For what these are *for*, see
 app's `auth`. The three discovery-and-probe endpoints (`/config`, `/healthz`,
 `/readyz`) are **unauthenticated by design**, which also means `/config`
 exposes the feature list and extras schema publicly. The split follows one
-rule: what `/config` returns is derived by the factory from feature names,
-pydantic models and pydantic-ai's media type lists, so it cannot carry a
-secret, while `/config/features` relays whatever a feature's `config()` hands
+rule: what `/config` returns is the product's `title` plus what the factory
+derives from feature names, pydantic models and pydantic-ai's media type lists,
+so it cannot carry a secret, while `/config/features` relays whatever a feature's `config()` hands
 it. `/config/features` answers with `Cache-Control: no-store`, since it sits
 under the otherwise public `/config` prefix.
 
@@ -69,7 +69,7 @@ pydantic-ai's `UserContent` wire form, `message_history` prior messages in its
 
 ```
 POST /run             {"output": "...", "conversation_id": "...", "run_id": "...", "messages": [...]}
-GET /config           {"features": ["storage"], "extras_schema": {...}, "accepts": ["application/pdf", ...]}
+GET /config           {"title": "..." | null, "features": ["storage"], "extras_schema": {...}, "accepts": ["application/pdf", ...]}
 GET /config/features  {"feature_config": {"storage": {"history_source": "server"}}}
 GET /healthz          {"status": "ok", "features": ["storage"]}
 GET /readyz           {"status": "ok", "reports": {"storage": {"pool": "ok"}}}
@@ -127,6 +127,7 @@ def create_agent_app(
     usage_limits: UsageLimitsSource = None,
     timeout: float | None = None,
     vercel_sdk_version: Literal[5, 6, 7] = 5,
+    title: str | None = None,
 ) -> FastAPI: ...
 ```
 
@@ -142,6 +143,7 @@ def create_agent_app(
 | `usage_limits` | `None` | A `UsageLimits`, or a callable over `UserContext` |
 | `timeout` | `None` | Pydantic AI's run `timeout` in seconds, forwarded to every run; `None` leaves runs unbounded |
 | `vercel_sdk_version` | `5` | Vercel AI SDK major the `/chat` wire targets |
+| `title` | `None` | Human-readable app name on `/config`; not the FastAPI `title` |
 
 An overload pairs `agent: Agent[DepsT, Any]` with `deps: DepsBuilder[DepsT]`,
 so a product's subclass type-checks end to end.

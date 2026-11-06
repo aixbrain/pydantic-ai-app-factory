@@ -22,6 +22,7 @@ def create_agent_app(
     error_handlers: ErrorHandlers | None = None,  # maps exceptions to AgentErrors
     usage_limits: UsageLimitsSource = None,  # Pydantic AI's, forwarded to every run
     timeout: float | None = None,  # Pydantic AI's, forwarded to every run
+    title: str | None = None,  # human-readable name served on `/config`
 ) -> FastAPI: ...
 ```
 
@@ -55,6 +56,8 @@ The three parameters related to Features are covered in the next section. The ot
 - **`vercel_sdk_version`** is the Vercel AI SDK major `/chat` targets. It
   stays at pydantic-ai's default of 5; raise it to match a frontend on a
   later SDK.
+- **`title`** is the app's human-readable name, served on `/config` so a UI
+  can name the agent. It is not the FastAPI `title` of the OpenAPI docs.
 
 The app enters the agent (`async with agent`) while it serves, so the models
 it runs keep their HTTP clients across runs and close them on shutdown. That
@@ -109,9 +112,9 @@ The resulting app is a plain `FastAPI` instance serving six endpoints:
     client sends to either is covered in [Agent Endpoints](agent-endpoints.md)
   - `/config/features` reports how each feature is configured
 - Public endpoints:
-  - `/config` for self-discovery: the features, their extras schema and the
-    file media types the app accepts (pydantic-ai's classes, not what the
-    model supports)
+  - `/config` for self-discovery: the title, the features, their extras
+    schema and the file media types the app accepts (pydantic-ai's classes,
+    not what the model supports)
   - `/healthz` for liveness probes
   - `/readyz` for feature health probes
 

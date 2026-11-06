@@ -63,6 +63,11 @@ def test_config_exposes_the_composed_extras_schema() -> None:
     assert 'caseId' in body['extras_schema']['properties']
 
 
+def test_config_serves_the_app_title() -> None:
+    assert make_client(title='Claims assistant').get('/config').json()['title'] == 'Claims assistant'
+    assert make_client().get('/config').json()['title'] is None
+
+
 def test_config_lists_the_media_types_a_file_may_have() -> None:
     # The same rule the endpoints refuse a file by, so a frontend can gate its picker on it.
     accepts = make_client().get('/config').json()['accepts']

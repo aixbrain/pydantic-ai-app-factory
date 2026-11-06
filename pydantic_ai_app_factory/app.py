@@ -65,6 +65,7 @@ def create_agent_app(
     error_handlers: ErrorHandlers | None = None,
     usage_limits: UsageLimitsSource = None,
     timeout: float | None = None,
+    title: str | None = None,
 ) -> FastAPI: ...
 
 
@@ -81,6 +82,7 @@ def create_agent_app(
     error_handlers: ErrorHandlers | None = None,
     usage_limits: UsageLimitsSource = None,
     timeout: float | None = None,
+    title: str | None = None,
 ) -> FastAPI: ...
 
 
@@ -96,6 +98,7 @@ def create_agent_app(
     error_handlers: ErrorHandlers | None = None,
     usage_limits: UsageLimitsSource = None,
     timeout: float | None = None,
+    title: str | None = None,
 ) -> FastAPI:
     """Compose an agent and its features into a FastAPI app serving the Vercel AI chat protocol.
 
@@ -115,6 +118,9 @@ def create_agent_app(
     `vercel_sdk_version` is the Vercel AI SDK major the `/chat` wire targets. It stays at pydantic-ai's
     own default of 5; raise it to match a frontend on a later SDK, which adds tool-approval streaming
     and provider metadata to the chunks.
+
+    `title` is the app's human-readable name, served on `GET /config` so a UI can name the agent. It is
+    not the FastAPI `title`, which stays the OpenAPI default.
     """
     expected_deps = _check_deps_type(agent, deps)
     # Fail loud before anything is built: a doubled feature would run its capabilities twice.
@@ -157,7 +163,7 @@ def create_agent_app(
             expected_deps,
             vercel_sdk_version,
         ),
-        ops_router(features, auth, extras_model, health_timeout),
+        ops_router(features, auth, extras_model, health_timeout, title),
     )
     for router in builtin_routers:
         app.include_router(router)
