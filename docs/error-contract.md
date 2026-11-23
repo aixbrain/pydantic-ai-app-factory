@@ -63,8 +63,8 @@ is a run your own code stopped with `ctx.cancel()` or `AgentRun.cancel()`, a
 client why a run stopped, raise an `AgentError` (or an exception
 `error_handlers` maps) instead of cancelling; both transports deliver it.
 `file-unsupported` (415, not retryable) is a file whose media type is outside
-what pydantic-ai classifies as an image, audio, video or document, refused
-before the run; `GET /config` lists the accepted types as `accepts`.
+pydantic-ai's image, audio, video and document type aliases, refused before
+the run; `GET /config` lists the accepted types as `accepts`.
 Everything else is `internal` (500), including a model class raising for a
 class it does not support, see [Agent endpoints](agent-endpoints.md#the-new-turn).
 

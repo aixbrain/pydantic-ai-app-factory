@@ -23,11 +23,12 @@ from pydantic_ai_app_factory.errors import AgentError
 ACCEPTED_MEDIA_TYPES: frozenset[str] = frozenset(
     get_args(ImageMediaType) + get_args(AudioMediaType) + get_args(VideoMediaType) + get_args(DocumentMediaType)
 )
-"""The media types pydantic-ai classifies as an image, audio, video or document.
+"""The image, audio, video and document media types pydantic-ai names in its public type aliases.
 
-Read from its public type aliases, so the set follows the library. It is the same for every model:
-what pydantic-ai can send, not what the deployed model supports. Every model class raises for a file
-outside it, halfway through the run, where the error would surface as a 500.
+They are the formats pydantic-ai knows model APIs to read, and the set follows the library. It is the
+same for every model: what pydantic-ai can send, not what the deployed model supports. pydantic-ai
+passes other types through to the provider, which rejects most of them mid-run as a 500; the app
+refuses them before the run instead.
 """
 
 
