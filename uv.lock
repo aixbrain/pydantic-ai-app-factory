@@ -1163,7 +1163,7 @@ email = [
 
 [[package]]
 name = "pydantic-ai-app-factory"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
