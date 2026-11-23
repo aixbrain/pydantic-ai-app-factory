@@ -216,7 +216,7 @@ Reserved, un-namespaced codes emitted by the package:
 | Code | Status | When | Retryable |
 |---|---|---|---|
 | `model-unavailable` | 503 | Model backend returned 429 or 5xx other than an exhausted quota, was unreachable, or every model of a `FallbackModel` failed; or a concurrency limit on the model or on the agent's runs turned the run away (`max_queued`) | yes |
-| `model-unauthorized` | 502 | Model backend returned 401 or 403 -- on every model of a `FallbackModel`, if one is used | no |
+| `model-unauthorized` | 502 | Model backend rejected the credentials (`ModelAuthenticationError`, or an uncategorized 401 or 403) -- on every model of a `FallbackModel`, if one is used | no |
 | `model-quota-exceeded` | 502 | The provider reported the account's quota, credits or billing exhausted (`ModelQuotaExceededError`) -- on every model of a `FallbackModel`, if one is used | no |
 | `model-context-exceeded` | 413 | The request exceeds the model's context window (`ModelContextWindowExceededError`) -- on every model of a `FallbackModel`, if one is used | no |
 | `model-refused` | 400 | The provider's content filter refused the request or the model's answer | no |
@@ -225,9 +225,9 @@ Reserved, un-namespaced codes emitted by the package:
 | `file-unsupported` | 415 | A file of a media type outside `accepts` on `GET /config`, refused before the run | no |
 | `internal` | 500 | Any unrecognized exception, or a handler that itself raised | no |
 
-Any other client-side model error (a 4xx other than 429, 401 and 403) is a
-bug, not an outage, and maps to `internal`. Namespace your own codes as
-`<feature>/<code>`.
+Any other request the model backend rejected (`ModelRequestRejectedError`, or
+an uncategorized 4xx other than 429, 401 and 403) is a bug, not an outage, and
+maps to `internal`. Namespace your own codes as `<feature>/<code>`.
 
 ## Package exports
 

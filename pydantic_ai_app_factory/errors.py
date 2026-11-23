@@ -12,9 +12,15 @@ from pydantic_ai.exceptions import (
     ContentFilterError,
     FallbackExceptionGroup,
     ModelAPIError,
+    ModelAuthenticationError,
+    ModelConnectionError,
     ModelContextWindowExceededError,
     ModelHTTPError,
     ModelQuotaExceededError,
+    ModelRateLimitError,
+    ModelRequestRejectedError,
+    ModelServerError,
+    ModelUnavailableError,
     RunCancelled,
     RunTimedOut,
 )
@@ -135,24 +141,41 @@ def _failures(exc: Exception) -> Sequence[Exception]:
     return exc.exceptions if isinstance(exc, FallbackExceptionGroup) else (exc,)
 
 
+_CATEGORIES = (
+    ModelRateLimitError,
+    ModelQuotaExceededError,
+    ModelUnavailableError,
+    ModelServerError,
+    ModelConnectionError,
+    ModelRequestRejectedError,
+)
+"""The error categories pydantic-ai assigns to provider errors. A `ModelHTTPError` outside them has no
+category, e.g. one a custom model raised, and is classified by its status."""
+
+
+def _uncategorized_status(exc: Exception) -> int | None:
+    """The HTTP status of a `ModelHTTPError` pydantic-ai put in no category, else `None`."""
+    return exc.status_code if isinstance(exc, ModelHTTPError) and not isinstance(exc, _CATEGORIES) else None
+
+
 def _provider_rejected_credentials(exc: Exception) -> bool:
     """Whether the model provider refused the deployment's credentials, on every model that was tried.
 
-    An approximation over HTTP status, because providers pass their raw status through and pydantic-ai
-    has no error category for it: most report a bad key as 401 (OpenAI, Anthropic, Azure, Groq, Mistral),
-    some as 403 (Bedrock, Vertex on a missing IAM permission). Gemini reports a bad key as 400, out of
-    reach without reading the response body, which this package deliberately does not do; map it in
-    `error_handlers` if a product needs it. With `FallbackModel` the group has to be credential failures
-    throughout: one model down and another rejecting the key is still an outage worth retrying.
+    pydantic-ai raises `ModelAuthenticationError` for a 401 or 403 and for providers that report a bad key
+    otherwise, like Gemini's 400; an uncategorized `ModelHTTPError` counts by its 401 or 403. With
+    `FallbackModel` the group has to be credential failures throughout: one model down and another
+    rejecting the key is still an outage worth retrying.
     """
-    return all(isinstance(e, ModelHTTPError) and e.status_code in (401, 403) for e in _failures(exc))
+    return all(
+        isinstance(e, ModelAuthenticationError) or _uncategorized_status(e) in (401, 403) for e in _failures(exc)
+    )
 
 
 def _every_failure_is(exc: Exception, category: type[ModelAPIError]) -> bool:
     """Whether pydantic-ai put the failure in `category`, on every model that was tried, as for credentials.
 
-    pydantic-ai sets a category only when the provider's error names the cause, so a plain
-    `ModelHTTPError` falls through to the status rules.
+    pydantic-ai sets the quota and context-window categories only when the provider's error names the
+    cause; any other failure is left to the remaining rules in `to_agent_error`.
     """
     return all(isinstance(e, category) for e in _failures(exc))
 
@@ -162,7 +185,10 @@ def _model_backend_unavailable(exc: Exception) -> bool:
 
     That is the provider failing transiently, or a concurrency limit's `max_queued` turning the run away,
     whether the limit sits on the model or on the agent's runs. The caller answers both by retrying later.
+    A request the provider rejected is not transient, with or without an HTTP status.
     """
-    if isinstance(exc, ModelHTTPError):
-        return exc.status_code == 429 or exc.status_code >= 500
+    if (status := _uncategorized_status(exc)) is not None:
+        return status == 429 or status >= 500
+    if isinstance(exc, ModelRequestRejectedError):
+        return False
     return isinstance(exc, ModelAPIError | FallbackExceptionGroup | ConcurrencyLimitExceeded)

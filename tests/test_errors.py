@@ -7,14 +7,18 @@ from pydantic_ai.exceptions import (
     ContentFilterError,
     FallbackExceptionGroup,
     ModelAPIError,
+    ModelAuthenticationError,
     ModelConnectionError,
     ModelContextWindowExceededError,
     ModelHTTPError,
+    ModelNotFoundError,
     ModelOverloadedError,
     ModelQuotaExceededError,
     ModelRateLimitError,
+    ModelRequestRejectedError,
     ModelRequestTimeout,
     ModelServerError,
+    ModelUnavailableError,
     RunCancelled,
     RunTimedOut,
 )
@@ -157,6 +161,41 @@ def test_a_provider_forbidding_the_account_is_model_unauthorized_too() -> None:
     # Bedrock and Vertex report a missing permission as 403 rather than 401.
     error = to_agent_error(ModelHTTPError(status_code=403, model_name='m'))
     assert (error.code, error.retryable, error.http_status) == ('model-unauthorized', False, 502)
+
+
+@pytest.mark.parametrize(
+    'exc',
+    [
+        # Gemini sends an invalid key as a 400, which pydantic-ai recognizes by the body's reason.
+        ModelHTTPError.for_category(ModelAuthenticationError, status_code=400, model_name='m'),
+        # An error event inside a stream carries no status.
+        ModelAuthenticationError(model_name='m', message='expired token'),
+    ],
+)
+def test_a_credential_rejection_is_model_unauthorized_whatever_its_status(exc: Exception) -> None:
+    error = to_agent_error(exc)
+    assert (error.code, error.retryable, error.http_status) == ('model-unauthorized', False, 502)
+
+
+def test_a_403_pydantic_ai_marks_as_unavailable_stays_a_retryable_outage() -> None:
+    # Bedrock answers 403 while a Marketplace subscription to the model is being processed, and says to
+    # retry; the category decides, not the status.
+    exc = ModelHTTPError.for_category(ModelUnavailableError, status_code=403, model_name='m')
+    error = to_agent_error(exc)
+    assert (error.code, error.retryable) == ('model-unavailable', True)
+
+
+@pytest.mark.parametrize(
+    'exc',
+    [
+        ModelRequestRejectedError(model_name='m', message='invalid argument'),
+        ModelNotFoundError(model_name='m', message='no such model'),
+    ],
+)
+def test_a_rejected_request_without_a_status_is_internal_not_a_retryable_outage(exc: Exception) -> None:
+    # The same request is rejected again, so a retry would not help.
+    error = to_agent_error(exc)
+    assert (error.code, error.retryable) == ('internal', False)
 
 
 def test_every_fallback_model_rejecting_the_key_is_model_unauthorized() -> None:
