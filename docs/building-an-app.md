@@ -110,7 +110,7 @@ The resulting app is a plain `FastAPI` instance serving six endpoints:
   - `/config/features` reports how each feature is configured
 - Public endpoints:
   - `/config` for self-discovery: the features, their extras schema and the
-    file media types the app accepts (pydantic-ai's classes, not what the
+    file media types the app accepts (pydantic-ai's type aliases, not what the
     model supports)
   - `/healthz` for liveness probes
   - `/readyz` for feature health probes

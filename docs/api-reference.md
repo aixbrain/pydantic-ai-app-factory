@@ -80,7 +80,7 @@ where `failures` maps each failing feature to the exception's *type name*
 only; the detail goes to the log.
 
 `accepts` is the set of media types the app accepts -- pydantic-ai's image,
-audio, video and document classes, identical for every model -- and says
+audio, video and document type aliases, identical for every model -- and says
 nothing about which of them the deployed model supports; see
 [Agent endpoints](agent-endpoints.md#the-new-turn).
 

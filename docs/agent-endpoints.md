@@ -50,12 +50,13 @@ with, which is how a client retries a failed run.
 Two rules on files are the factory's own, and both hold on `/chat` as well. A
 file URL whose media type cannot be inferred from its extension needs an
 explicit `media_type`; without one the request is a 422. And a file, inline
-or by URL, must have a media type pydantic-ai classifies as an image, audio,
-video or document; `GET /config` lists those types as `accepts`, so a frontend
-can gate its file picker on them. That is what the app accepts, not what the
-model supports. Any other type is refused before the run with a 415
-`file-unsupported` from the [error contract](error-contract.md), so nothing
-runs and nothing is stored.
+or by URL, must have a media type from pydantic-ai's image, audio, video or
+document type aliases, the formats it knows model APIs to read; `GET /config`
+lists those types as `accepts`, so a frontend can gate its file picker on them.
+That is what the app accepts, not what the model supports. pydantic-ai passes
+other types through to the provider, which rejects most of them mid-run; the
+app refuses them before the run with a 415 `file-unsupported` from the
+[error contract](error-contract.md), so nothing runs and nothing is stored.
 
 Whether the deployed model supports all four classes depends on the provider;
 pydantic-ai's [input guide](https://pydantic.dev/docs/ai/core-concepts/input/)
