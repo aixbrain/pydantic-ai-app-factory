@@ -45,8 +45,8 @@ quotas or all context overflows. It also covers a concurrency limit's
 `max_queued` turning the run away, whether the limit sits on the model or on
 the agent's runs; the client answers that the same way, by retrying later.
 `model-unauthorized` (502, not retryable) is the provider rejecting the
-deployment's credentials -- a 401 or 403, or every model of a `FallbackModel`
-reporting one -- which is a configuration error, not a bug in your code, and
+deployment's credentials -- on every model of a `FallbackModel`, if one is
+used -- which is a configuration error, not a bug in your code, and
 retrying will not help. `model-quota-exceeded` (502, not retryable) is the
 provider reporting the account's quota, credits or billing exhausted, even
 when it sends a 429, and needs the same attention. `model-context-exceeded`
@@ -68,12 +68,13 @@ before the run; `GET /config` lists the accepted types as `accepts`.
 Everything else is `internal` (500), including a model class raising for a
 class it does not support, see [Agent endpoints](agent-endpoints.md#the-new-turn).
 
-An exhausted quota and a context overflow are recognized when pydantic-ai
-raises `ModelQuotaExceededError` or `ModelContextWindowExceededError`, which
-it does when the provider's error names the cause; everything else is split
-by HTTP status. Gemini reports a bad key as 400, indistinguishable from a
-genuine bad request without reading the response body, which the runner
-deliberately does not do; translate it in `error_handlers` if you need it.
+The runner classifies a model error by the category pydantic-ai raises.
+`ModelAuthenticationError` is `model-unauthorized`, including Gemini's bad key
+sent as a 400. `ModelQuotaExceededError` and `ModelContextWindowExceededError`
+have their own codes, the transient categories are `model-unavailable`, and any
+other `ModelRequestRejectedError` is `internal`. A `ModelHTTPError` without a
+category, as a custom model may raise it, is classified by HTTP status: 401 and
+403 are `model-unauthorized`, 429 and 5xx are `model-unavailable`.
 
 ## Choosing a status
 
