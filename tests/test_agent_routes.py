@@ -29,6 +29,7 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.run import AgentRunResult
 from pydantic_ai.usage import UsageLimits
 
 from pydantic_ai_app_factory import AgentError, AppDeps, Feature, UserContext
@@ -491,6 +492,146 @@ def test_a_product_mapping_for_a_cancelled_run_reaches_both_transports() -> None
     assert (resp.status_code, resp.json()['code']) == (403, 'policy/blocked')
     chunks = _chunks(client.post('/chat', json=submit('hi')).text)
     assert [chunk['data']['code'] for chunk in chunks if chunk['type'] == 'data-error'] == ['policy/blocked']
+
+
+# --- client disconnect ---
+
+
+@dataclass
+class _RunOutcome(AbstractCapability[AppDeps]):
+    # Records how each run ended, through the hooks a feature that stores turns relies on.
+    outcomes: list[str]
+    ended: asyncio.Event
+
+    async def after_run(self, ctx: RunContext[AppDeps], *, result: AgentRunResult[Any]) -> AgentRunResult[Any]:
+        self.outcomes.append(f'answered: {result.output}')
+        self.ended.set()
+        return result
+
+    async def on_run_error(self, ctx: RunContext[AppDeps], *, error: BaseException) -> AgentRunResult[Any]:
+        self.outcomes.append(f'failed: {type(error).__name__}')
+        self.ended.set()
+        raise error
+
+
+def _gated_agent(
+    gate: asyncio.Event, outcome: _RunOutcome, waiting: asyncio.Event | None = None
+) -> Agent[AppDeps, str]:
+    # Streams one word, then sets `waiting` and holds the rest of the answer until `gate` opens.
+    async def stream(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        yield 'first '
+        if waiting is not None:
+            waiting.set()
+        await gate.wait()
+        yield 'second'
+
+    return Agent(FunctionModel(stream_function=stream), deps_type=AppDeps, capabilities=[outcome])
+
+
+async def _chat_then_disconnect(app: Any, *, after: asyncio.Event | None) -> int:
+    """POST `/chat` over raw ASGI and disconnect once `after` is set, or before the response starts without it.
+
+    Returns how many body bytes reached the client.
+    """
+    body = json.dumps(submit('hi')).encode()
+    request_sent = False
+    received = 0
+
+    async def receive() -> dict[str, Any]:
+        nonlocal request_sent
+        if not request_sent:
+            request_sent = True
+            return {'type': 'http.request', 'body': body, 'more_body': False}
+        if after is not None:
+            await after.wait()
+        return {'type': 'http.disconnect'}
+
+    async def send(message: dict[str, Any]) -> None:
+        nonlocal received
+        if message['type'] == 'http.response.start' and after is None:
+            await asyncio.Event().wait()  # held until the disconnect cancels the response
+        if message['type'] == 'http.response.body':
+            received += len(message.get('body', b''))
+
+    scope = {
+        'type': 'http',
+        # Spec 2.3 is what uvicorn reports, and Starlette cancels the response on a disconnect under it.
+        'asgi': {'version': '3.0', 'spec_version': '2.3'},
+        'http_version': '1.1',
+        'method': 'POST',
+        'scheme': 'http',
+        'path': '/chat',
+        'raw_path': b'/chat',
+        'query_string': b'',
+        'root_path': '',
+        'headers': [(b'content-type', b'application/json')],
+        'client': ('testclient', 1),
+        'server': ('testserver', 80),
+    }
+    await app(scope, receive, send)
+    return received
+
+
+def _other_tasks() -> list[asyncio.Task[Any]]:
+    return [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+
+
+def test_by_default_a_disconnect_mid_answer_cancels_the_chat_run() -> None:
+    async def scenario() -> list[str]:
+        outcome, waiting = _RunOutcome([], asyncio.Event()), asyncio.Event()
+        app = create_agent_app(_gated_agent(asyncio.Event(), outcome, waiting), auth=auth)
+        assert await _chat_then_disconnect(app, after=waiting) > 0
+        assert _other_tasks() == []
+        return outcome.outcomes
+
+    assert asyncio.run(scenario()) == ['failed: CancelledError']
+
+
+@pytest.mark.parametrize('mid_answer', [True, False], ids=['mid-answer', 'before-response'])
+def test_with_continue_on_disconnect_the_chat_run_finishes_after_the_client_left(mid_answer: bool) -> None:
+    async def scenario() -> list[str]:
+        gate, outcome, waiting = asyncio.Event(), _RunOutcome([], asyncio.Event()), asyncio.Event()
+        app = create_agent_app(_gated_agent(gate, outcome, waiting), auth=auth, continue_on_disconnect=True)
+        received = await _chat_then_disconnect(app, after=waiting if mid_answer else None)
+        assert (received > 0) is mid_answer
+        await asyncio.wait_for(waiting.wait(), timeout=5)
+        assert outcome.outcomes == []
+        gate.set()
+        await asyncio.wait_for(outcome.ended.wait(), timeout=5)
+        return outcome.outcomes
+
+    assert asyncio.run(scenario()) == ['answered: first second']
+
+
+def test_with_continue_on_disconnect_a_connected_chat_streams_as_before() -> None:
+    chunks = _chunks(make_client(continue_on_disconnect=True).post('/chat', json=submit('hi')).text)
+    assert chunks[0]['type'] == 'start'
+    assert chunks[-1]['type'] == 'finish'
+    assert any(chunk['type'] == 'text-delta' for chunk in chunks)
+
+
+def test_with_continue_on_disconnect_a_connected_chat_still_gets_the_error_envelope() -> None:
+    async def stream(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        yield 'partial'
+        raise RuntimeError('provider broke')
+
+    agent = Agent(FunctionModel(stream_function=stream), deps_type=AppDeps)
+    chunks = _chunks(make_client(agent=agent, continue_on_disconnect=True).post('/chat', json=submit('hi')).text)
+    assert [chunk['data']['code'] for chunk in chunks if chunk['type'] == 'data-error'] == ['internal']
+
+
+def test_shutdown_waits_for_a_chat_run_that_outlived_its_client() -> None:
+    async def scenario() -> list[str]:
+        gate, outcome, waiting = asyncio.Event(), _RunOutcome([], asyncio.Event()), asyncio.Event()
+        app = create_agent_app(_gated_agent(gate, outcome, waiting), auth=auth, continue_on_disconnect=True)
+        async with app.router.lifespan_context(app):
+            await _chat_then_disconnect(app, after=waiting)
+            # Opens only once the shutdown below is already waiting on the run.
+            asyncio.get_running_loop().call_soon(gate.set)
+        assert _other_tasks() == []
+        return outcome.outcomes
+
+    assert asyncio.run(scenario()) == ['answered: first second']
 
 
 @dataclass(kw_only=True)

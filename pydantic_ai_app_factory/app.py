@@ -12,6 +12,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
 from pydantic_ai_app_factory._agent_routes import agent_router
+from pydantic_ai_app_factory._detach import DetachedRuns
 from pydantic_ai_app_factory._envelope import handle_agent_error
 from pydantic_ai_app_factory._extras import compose_extras_model
 from pydantic_ai_app_factory._ops_routes import ops_router
@@ -65,6 +66,7 @@ def create_agent_app(
     error_handlers: ErrorHandlers | None = None,
     usage_limits: UsageLimitsSource = None,
     timeout: float | None = None,
+    continue_on_disconnect: bool = False,
 ) -> FastAPI: ...
 
 
@@ -81,6 +83,7 @@ def create_agent_app(
     error_handlers: ErrorHandlers | None = None,
     usage_limits: UsageLimitsSource = None,
     timeout: float | None = None,
+    continue_on_disconnect: bool = False,
 ) -> FastAPI: ...
 
 
@@ -96,6 +99,7 @@ def create_agent_app(
     error_handlers: ErrorHandlers | None = None,
     usage_limits: UsageLimitsSource = None,
     timeout: float | None = None,
+    continue_on_disconnect: bool = False,
 ) -> FastAPI:
     """Compose an agent and its features into a FastAPI app serving the Vercel AI chat protocol.
 
@@ -112,6 +116,10 @@ def create_agent_app(
     `timeout` is Pydantic AI's run `timeout=` in seconds, forwarded to every run. Without one, a hanging
     provider or tool keeps the request open indefinitely.
 
+    `continue_on_disconnect` lets a `/chat` run finish after its client disconnects, so a feature that
+    stores turns keeps the answer. Off by default because without such a feature the finished run
+    only costs tokens; a shutdown waits for runs still in flight, as it does for connected ones.
+
     `vercel_sdk_version` is the Vercel AI SDK major the `/chat` wire targets. It stays at pydantic-ai's
     own default of 5; raise it to match a frontend on a later SDK, which adds tool-approval streaming
     and provider metadata to the chunks.
@@ -127,6 +135,9 @@ def create_agent_app(
     extras_model = compose_extras_model(features, shared_extras_fields=shared_extras_fields)
     capabilities = [capability for feature in features for capability in feature.capabilities()]
 
+    # Stays empty unless `continue_on_disconnect` is set.
+    detached_runs = DetachedRuns()
+
     # Chain the feature lifespans on one stack: they open in order and close in reverse on shutdown.
     # The agent is entered last, so the models it runs keep their HTTP clients for the app's lifetime
     # and close them before the infrastructure the features opened.
@@ -138,6 +149,8 @@ def create_agent_app(
                 if context is not None:
                     await stack.enter_async_context(context)
             await stack.enter_async_context(agent)
+            # Registered last so it runs first, while the drained runs can still reach the agent and features.
+            stack.push_async_callback(detached_runs.drain)
             yield
 
     app = FastAPI(lifespan=lifespan)
@@ -156,6 +169,7 @@ def create_agent_app(
             deps,
             expected_deps,
             vercel_sdk_version,
+            detached_runs if continue_on_disconnect else None,
         ),
         ops_router(features, auth, extras_model, health_timeout),
     )
