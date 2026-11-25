@@ -24,6 +24,7 @@ from pydantic_ai.messages import (
 from pydantic_ai.usage import UsageLimits
 from starlette.responses import Response
 
+from pydantic_ai_app_factory._detach import DetachedRuns
 from pydantic_ai_app_factory._envelope import log_agent_error
 from pydantic_ai_app_factory._files import content_media_types, message_media_types, require_accepted
 from pydantic_ai_app_factory._vercel import VercelAdapter
@@ -179,8 +180,12 @@ def agent_router(
     deps_builder: DepsBuilder[AppDeps] | None,
     expected_deps: type[AppDeps],
     vercel_sdk_version: VercelSdkVersion,
+    detached_runs: DetachedRuns | None,
 ) -> APIRouter:
-    """The `/chat` and `/run` endpoints over the composed agent."""
+    """The `/chat` and `/run` endpoints over the composed agent.
+
+    With `detached_runs`, a `/chat` run continues after its client disconnects and is held there until it ends.
+    """
     router = APIRouter()
     request_model = RunRequest[extras_model]  # pyright: ignore[reportInvalidTypeArguments]
 
@@ -225,7 +230,9 @@ def agent_router(
             timeout=timeout,
             run_id=run_id,
         )
-        return adapter.streaming_response(stream)
+        if detached_runs is None:
+            return adapter.streaming_response(stream)
+        return adapter.streaming_response(detached_runs.start(stream))
 
     # The body model is parameterized at composition time with the features' extras, which pyright
     # cannot express as a static type -- hence the ignore on the `body` parameter.
