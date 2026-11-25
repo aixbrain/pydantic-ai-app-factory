@@ -22,6 +22,7 @@ def create_agent_app(
     error_handlers: ErrorHandlers | None = None,  # maps exceptions to AgentErrors
     usage_limits: UsageLimitsSource = None,  # Pydantic AI's, forwarded to every run
     timeout: float | None = None,  # Pydantic AI's, forwarded to every run
+    continue_on_disconnect: bool = False,  # lets a `/chat` run outlive its client
 ) -> FastAPI: ...
 ```
 
@@ -52,6 +53,13 @@ The three parameters related to Features are covered in the next section. The ot
   in seconds, forwarded to every run. Without one, a run holds its request
   open for as long as a provider or tool hangs; a run past it ends as the
   `run-timeout` error.
+- **`continue_on_disconnect`** lets a `/chat` run finish after its client
+  disconnects (a closed tab, a reload, a dropped network), so a feature that
+  stores turns keeps the answer; it is off by default because without such a
+  feature the finished run only costs tokens. With it on, the AI SDK's `stop()`
+  only closes the connection, a shutdown waits for these runs as for connected
+  ones, and no connection limit bounds them, so set `timeout` and keep resources
+  that close with the response out of the `deps` builder.
 - **`vercel_sdk_version`** is the Vercel AI SDK major `/chat` targets. It
   stays at pydantic-ai's default of 5; raise it to match a frontend on a
   later SDK.

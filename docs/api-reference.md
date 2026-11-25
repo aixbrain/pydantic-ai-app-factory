@@ -126,6 +126,7 @@ def create_agent_app(
     error_handlers: ErrorHandlers | None = None,
     usage_limits: UsageLimitsSource = None,
     timeout: float | None = None,
+    continue_on_disconnect: bool = False,
     vercel_sdk_version: Literal[5, 6, 7] = 5,
 ) -> FastAPI: ...
 ```
@@ -141,6 +142,7 @@ def create_agent_app(
 | `error_handlers` | `None` | `(type, AgentError \| callable)` pairs, first match wins |
 | `usage_limits` | `None` | A `UsageLimits`, or a callable over `UserContext` |
 | `timeout` | `None` | Pydantic AI's run `timeout` in seconds, forwarded to every run; `None` leaves runs unbounded |
+| `continue_on_disconnect` | `False` | Lets a `/chat` run finish after its client disconnects; a shutdown waits for such runs |
 | `vercel_sdk_version` | `5` | Vercel AI SDK major the `/chat` wire targets |
 
 An overload pairs `agent: Agent[DepsT, Any]` with `deps: DepsBuilder[DepsT]`,
